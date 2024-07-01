@@ -1,0 +1,11 @@
+# Docker Compose reference guide at
+# https://docs.docker.com/go/compose-spec-reference/
+
+services:
+  # PREFECT WORKER
+  worker:
+    build:
+      context: ./worker
+    environment:
+      PREFECT_API_URL: ${PREFECT_API_URL}
+      PREFECT_API_KEY: ${PREFECT_API_KEY}
