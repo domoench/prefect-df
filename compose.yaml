@@ -11,5 +11,3 @@ services:
       PREFECT_API_KEY: ${PREFECT_API_KEY}
     volumes:
       - ./flows:/opt/prefect/flows
-      # Bind mount docker socket, so container can communicate with docker daemon
-      - /var/run/docker.sock:/var/run/docker.sock
