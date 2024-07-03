@@ -1,6 +1,10 @@
 #!/bin/bash
 
-echo "Prefect API URL: $PREFECT_API_URL"
+# Register flow deployments with prefect server
+echo "Deploying flows."
+python /opt/prefect/flows/etl_flow.py
 
 # Start the Prefect worker and connect to the work pool
-prefect worker start --pool "lf"
+WORK_POOL="lf-dev"
+echo "Starting prefect worker in pool $WORK_POOL."
+prefect worker start --pool $WORK_POOL
