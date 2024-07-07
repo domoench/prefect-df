@@ -4,9 +4,16 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+ipython = "*"
+numpy = "*"
+pandas = "*"
 
 [dev-packages]
 flake8 = "*"
+jupyter = "*"
+ipykernel = "*"
+seaborn = "*"
+matplotlib = "*"
 
 [requires]
 python_version = "3.10"

@@ -11,3 +11,21 @@ services:
       PREFECT_API_KEY: ${PREFECT_API_KEY}
     volumes:
       - ./flows:/opt/prefect/flows
+
+  # POSTGRES DB
+  db:
+    image: postgres:16.3-alpine3.20
+    restart: always
+    shm_size: 128mb
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=timeseries
+    expose:
+      - 5432
+    volumes:
+      - db:/var/lib/postgresql/data
+      - ./db/init_timeseries_table.sql:/docker-entrypoint-initdb.d/init_timeseries_table.sql
+
+volumes:
+  db:
