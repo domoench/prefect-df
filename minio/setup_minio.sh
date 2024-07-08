@@ -10,6 +10,7 @@ minio_setup() {
 }
 
 # Run the setup function in the background.
+# TODO: This feel's hacky. There's probably a better way.
 minio_setup &
 
 # I've overwritten the base image (minio's) ENTRYPOINT with my
