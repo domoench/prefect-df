@@ -12,20 +12,18 @@ services:
     volumes:
       - ./flows:/opt/prefect/flows
 
-  # POSTGRES DB
-  db:
-    image: postgres:16.3-alpine3.20
-    restart: always
-    shm_size: 128mb
+  # OBJECT STORAGE
+  minio:
+    image: minio/minio:latest
+    entrypoint: ["minio", "server", "--address", "0.0.0.0:9000", "--console-address", "0.0.0.0:9001", "/data"]
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=timeseries
-    expose:
-      - 5432
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
-      - db:/var/lib/postgresql/data
-      - ./db/init_timeseries_table.sql:/docker-entrypoint-initdb.d/init_timeseries_table.sql
+      - "minio:/data"
+    ports:
+      - 9000:9000
+      - 9001:9001
 
 volumes:
-  db:
+  minio:

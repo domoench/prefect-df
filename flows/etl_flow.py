@@ -7,7 +7,6 @@ def etl():
     print("Transforming timeseries.")
     print("Loading timeseries into warehouse.")
 
-
 if __name__ == "__main__":
 
     # For dev workers, deploy to Process-type dev work pool.
