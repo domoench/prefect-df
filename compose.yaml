@@ -9,6 +9,9 @@ services:
     environment:
       PREFECT_API_URL: ${PREFECT_API_URL}
       PREFECT_API_KEY: ${PREFECT_API_KEY}
+      DF_ENVIRONMENT: ${DF_ENVIRONMENT}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - ./flows:/opt/prefect/flows
 

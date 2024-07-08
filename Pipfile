@@ -8,6 +8,7 @@ ipython = "*"
 numpy = "*"
 pandas = "*"
 boto3 = "*"
+prefect = "2.19.7 "
 
 [dev-packages]
 flake8 = "*"

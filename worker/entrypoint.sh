@@ -2,7 +2,7 @@
 
 # Register flow deployments with prefect server
 echo "Deploying flows."
-python /opt/prefect/flows/etl_flow.py
+python /opt/prefect/flows/deploy_flows.py
 
 # Start the Prefect worker and connect to the work pool
 WORK_POOL="lf-dev"

@@ -19,8 +19,3 @@ def get_s3_client():
     else:
         raise Exception(f'Unknown environment: {df_env}')
     return s3_client
-
-
-s3_client = get_s3_client()
-buckets = s3_client.list_buckets()
-print(buckets)
