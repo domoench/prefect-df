@@ -1,3 +1,4 @@
-.env.local
+.env
 .ipynb_checkpoints/
 data/*
+.virtual_documents/

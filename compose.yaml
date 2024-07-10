@@ -7,7 +7,7 @@ services:
     build:
       context: ./worker
     env_file:
-      - .env.local
+      - .env
     volumes:
       - ./flows:/opt/prefect/flows
 
@@ -16,7 +16,7 @@ services:
     build:
       context: ./minio
     env_file:
-      - .env.local
+      - .env
     volumes:
       - "minio:/data"
     ports:
