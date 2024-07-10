@@ -6,7 +6,7 @@ minio_setup() {
 
   # Create the bucket
   mc alias set local http://localhost:9000 $MINIO_ROOT_USER $MINIO_ROOT_PASSWORD
-  mc mb local/timeseries || true
+  mc mb local/${TIMESERIES_BUCKET_NAME} || true
 }
 
 # Run the setup function in the background.

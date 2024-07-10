@@ -9,6 +9,7 @@ numpy = "*"
 pandas = "*"
 boto3 = "*"
 prefect = "2.19.7 "
+pyarrow = "*"
 
 [dev-packages]
 flake8 = "*"

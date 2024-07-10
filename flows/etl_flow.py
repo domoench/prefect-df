@@ -1,11 +1,14 @@
 from prefect import flow, task
+from prefect.tasks import task_input_hash
 from utils.storage import get_s3_client
+from utils.pandas import print_df_summary
 import requests
 import pandas as pd
 import os
+import io
 
 
-@task
+@task()
 def request_EIA_data(start, end, offset, length):
     print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
@@ -26,13 +29,8 @@ def request_EIA_data(start, end, offset, length):
     return pd.DataFrame(r.json()['response']['data'])
 
 
-@task
-def extract():
-    print("Downloading timeseries.")
-
-    # Calculate the number of rows to fetch from the API between start and end
-    start = pd.to_datetime('2015-07-01 05:00:00+00:00')
-    end = pd.to_datetime('2024-06-28 04:00:00+00:00')
+@task(cache_key_fn=task_input_hash)
+def concurrent_fetch_EIA_data(start, end):
     time_span = end - start
     hours = int(time_span.total_seconds() / 3600)
 
@@ -67,24 +65,61 @@ def extract():
 
 
 @task
-def transform(df):
-    print('Transforming timeseries.')
-    print(f'Dataframe length: {len(df)}')
-    print(f'Dataframe head: {df.head()}')
-    # Save into a dataframe
-    # Convert types
-    # Imputation? Or save that for later down the pipe?
+def extract():
+    print("Fetching EIA electricty demand timeseries.")
+
+    # Calculate the number of rows to fetch from the API between start and end
+    start = pd.to_datetime('2015-07-01 05:00:00+00:00')
+    end = pd.to_datetime('2024-06-28 04:00:00+00:00')
+    eia_df = concurrent_fetch_EIA_data(start, end)
+
+    print_df_summary(eia_df)
+
+    return eia_df
 
 
 @task
-def load():
+def transform(eia_df):
+    print('Transforming timeseries.')
+
+    # Convert types
+    eia_df['UTC period'] = pd.to_datetime(eia_df['period'], utc=True)
+    eia_df['value'] = pd.to_numeric(eia_df['value'])
+
+    # In the EIA API response, for any given hour, there is 1 rows for D value
+    # and another for the DF value. Update dataframe to have 1 row, with 2
+    # columns: D and DF. Units are MWh.
+    demand_df = eia_df[eia_df.type == 'D']
+    d_forecast_df = eia_df[eia_df.type == 'DF']
+    eia_df = pd.merge(
+        demand_df[['UTC period', 'respondent', 'value']].rename(columns={'value': 'D'}),
+        d_forecast_df[['UTC period', 'value']].rename(columns={'value': 'DF'}),
+        on='UTC period')
+
+    # TODO: Imputation? Or save that for later down the pipe?
+
+    print_df_summary(eia_df)
+    return eia_df
+
+
+@task
+def load(df):
     print("Loading timeseries into warehouse.")
-    # TODO: Convert dataframe to parquet file
-    # TODO: Encode start and end times into file name
-    # TODO: Write to S3
-    s3_client = get_s3_client()
-    buckets = s3_client.list_buckets()
-    print(buckets)
+    # Convert dataframe to parquet file
+    buff = io.BytesIO()
+    df.to_parquet(buff)
+    buff.seek(0)  # Reset buffer position to the beginning
+
+    # Encode start and end times into file name
+    start_str = df['UTC period'].min().strftime('%Y-%m-%d_%H')
+    end_str = df['UTC period'].max().strftime('%Y-%m-%d_%H')
+    filename = f'eia_d_df_{start_str}_{end_str}.parquet'
+    bucket = os.environ['TIMESERIES_BUCKET_NAME']
+
+    # Write to S3
+    s3 = get_s3_client()
+    s3.upload_fileobj(buff, bucket, filename)
+    print(f'Uploaded {bucket}/{filename}.')
 
 
 @flow(log_prints=True)
@@ -93,5 +128,5 @@ def etl():
     persists it in the S3 data warehouse as a parquet file.
     """
     df = extract()
-    transform(df)
-    load()
+    df = transform(df)
+    load(df)
