@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "aba81c12359d39aacaeff29d1d7e117b18ed32b98bbc52c35719ef1935a4aa2a"
+            "sha256": "4df61d9bc58b45ede27fa3799e8ff3fe95d6e0d6df2961d4303653e660c6c684"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -2058,6 +2058,14 @@
             "markers": "python_version >= '3.8'",
             "version": "==6.1.0"
         },
+        "cattrs": {
+            "hashes": [
+                "sha256:0341994d94971052e9ee70662542699a3162ea1e0c62f7ce1b4a57f563685108",
+                "sha256:a934090d95abaa9e911dac357e3a8699e0b4b14f8529bcc7d2b1ad9d51672b9f"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==23.2.3"
+        },
         "certifi": {
             "hashes": [
                 "sha256:5a1e7645bc0ec61a09e26c36f6106dd4cf40c6db3a1fb6352b0244e7fb057c7b",
@@ -2337,6 +2345,14 @@
             ],
             "version": "==0.3.8"
         },
+        "docstring-to-markdown": {
+            "hashes": [
+                "sha256:27afb3faedba81e34c33521c32bbd258d7fbb79eedf7d29bc4e81080e854aec0",
+                "sha256:e146114d9c50c181b1d25505054a8d0f7a476837f0da2c19f07e06eaed52b73d"
+            ],
+            "markers": "python_version >= '3.6'",
+            "version": "==0.15"
+        },
         "exceptiongroup": {
             "hashes": [
                 "sha256:5258b9ed329c5bbdd31a309f53cbfb0b155341807f6ff7606a1e801a891b29ad",
@@ -2508,6 +2524,15 @@
             "markers": "python_version >= '3.6'",
             "version": "==0.19.1"
         },
+        "jedi-language-server": {
+            "hashes": [
+                "sha256:53c6ce0eae5e332e5f6d76acf8d8c9cf33eae8191d31cc37913773127cd09f28",
+                "sha256:af010173f9f62dfcd3b3f4e2ea0ea3020fb4285c9b6b18b481aa978f28b5a36a"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.8' and python_version < '4.0'",
+            "version": "==0.41.4"
+        },
         "jinja2": {
             "hashes": [
                 "sha256:4a3aee7acbbe7303aede8e9648d13b8bf88a429282aa6122a993f0ac800cb369",
@@ -2594,6 +2619,7 @@
                 "sha256:45fbddbd505f3fbfb0b6cb2f1bc5e15e83ab7c79cd6e89416b248cb3c00c11da",
                 "sha256:793147a05ad446f809fd53ef1cd19a9f5256fd0a2d6b7ce943a982cb4f545001"
             ],
+            "index": "pypi",
             "markers": "python_version >= '3.8'",
             "version": "==2.2.5"
         },
@@ -2620,6 +2646,15 @@
             ],
             "markers": "python_version >= '3.8'",
             "version": "==4.2.3"
+        },
+        "jupyterlab-lsp": {
+            "hashes": [
+                "sha256:290f473b001c7ebe1edfe391a545f50bc4aefe89d4a64db4f17e8de301db3a37",
+                "sha256:aeac84093ada6d20ef57ae0e97811cc5796a0cab7237b32f8eddf993c0bb0356"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.8'",
+            "version": "==5.1.0"
         },
         "jupyterlab-pygments": {
             "hashes": [
@@ -2754,6 +2789,14 @@
             ],
             "markers": "python_version >= '3.7'",
             "version": "==1.4.5"
+        },
+        "lsprotocol": {
+            "hashes": [
+                "sha256:c75223c9e4af2f24272b14c6375787438279369236cd568f596d4951052a60f2",
+                "sha256:cc5c15130d2403c18b734304339e51242d3018a05c4f7d0f198ad6e0cd21861d"
+            ],
+            "markers": "python_version >= '3.7'",
+            "version": "==2023.0.1"
         },
         "markupsafe": {
             "hashes": [
@@ -3251,6 +3294,14 @@
             ],
             "markers": "python_version >= '3.8'",
             "version": "==3.2.0"
+        },
+        "pygls": {
+            "hashes": [
+                "sha256:140edceefa0da0e9b3c533547c892a42a7d2fd9217ae848c330c53d266a55018",
+                "sha256:6e00f11efc56321bdeb6eac04f6d86131f654c7d49124344a9ebb968da3dd91e"
+            ],
+            "markers": "python_version >= '3.8'",
+            "version": "==1.3.1"
         },
         "pygments": {
             "hashes": [
