@@ -6,15 +6,29 @@ import os
 
 
 @task
-def extract():
-    print("Downloading timeseries.")
-    # TODO: Fetch EIA data
-    # TODO: Demonstrate concurrent fetch of paginated API requests
-
+def request_EIA_data(start, end, offset, length):
+    print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
            'facets[type][]=D&facets[type][]=DF&sort[0][column]=period&'
            'sort[0][direction]=asc')
+
+    params = {
+        'offset': offset,
+        'length': length,
+        'api_key': os.environ['EIA_API_KEY'],
+        'start': start.strftime('%Y-%m-%dT%H'),
+        'end': end.strftime('%Y-%m-%dT%H'),
+    }
+
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    return pd.DataFrame(r.json()['response']['data'])
+
+
+@task
+def extract():
+    print("Downloading timeseries.")
 
     # Calculate the number of rows to fetch from the API between start and end
     start = pd.to_datetime('2015-07-01 05:00:00+00:00')
@@ -24,42 +38,31 @@ def extract():
 
     # Calculate how many paginated API requests will be required to fetch all
     # the timeseries data
-    REQUEST_ROWS = 5000
-    num_full_requests = hours // REQUEST_ROWS
-    final_request_length = hours % REQUEST_ROWS
+    MAX_REQUEST_ROWS = 5000
+    num_full_requests = hours // MAX_REQUEST_ROWS
+    final_request_length = hours % MAX_REQUEST_ROWS
     print(f'Fetching {hours} hours of data. Start: {start}. End: {end}')
-    print((f'Will make {num_full_requests} {REQUEST_ROWS}-length requests and '
-           f'one {final_request_length}-length request.'))
+    print((f'Will make {num_full_requests} {MAX_REQUEST_ROWS}-length requests '
+           f'and one {final_request_length}-length request.'))
 
-    # Build a list of dataframes storing each API request (page)'s response
-    response_dfs = []
+    # Make the requests concurrently
+    result_df_futures = []
 
-    def append_EIA_page_response_df(start, end, offset, length, result_list):
-        print(f'Fetching API page. offset:{offset}. length:{length}')
-
-        params = {
-            'offset': offset,
-            'length': length,
-            'api_key': os.environ['EIA_API_KEY'],
-            'start': start.strftime('%Y-%m-%dT%H'),
-            'end': end.strftime('%Y-%m-%dT%H'),
-        }
-
-        r = requests.get(url, params=params)
-        r.raise_for_status()
-        result_df = pd.DataFrame(r.json()['response']['data'])
-        result_list.append(result_df)
-
-    # Make the full-length requests
+    # Initiate the full-length requests
     for i in range(num_full_requests):
-        offset = i * REQUEST_ROWS
-        append_EIA_page_response_df(start, end, offset, REQUEST_ROWS,
-                                    response_dfs)
-    # Make the final remainder request
-    append_EIA_page_response_df(start, end, num_full_requests * REQUEST_ROWS,
-                                final_request_length, response_dfs)
+        offset = i * MAX_REQUEST_ROWS
+        result_df_futures.append(request_EIA_data.submit(start, end, offset,
+                                                         MAX_REQUEST_ROWS))
 
-    api_df = pd.concat(response_dfs)
+    # Initiate the final remainder request
+    result_df_futures.append(
+        request_EIA_data.submit(start, end,
+                                num_full_requests * MAX_REQUEST_ROWS,
+                                final_request_length)
+    )
+
+    result_dfs = [future.result() for future in result_df_futures]
+    api_df = pd.concat(result_dfs)
     return api_df
 
 
@@ -67,6 +70,7 @@ def extract():
 def transform(df):
     print('Transforming timeseries.')
     print(f'Dataframe length: {len(df)}')
+    print(f'Dataframe head: {df.head()}')
     # Save into a dataframe
     # Convert types
     # Imputation? Or save that for later down the pipe?
