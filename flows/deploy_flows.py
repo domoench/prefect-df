@@ -1,4 +1,5 @@
 from etl_flow import etl
+from train_model_flow import train_model
 
 
 if __name__ == "__main__":
@@ -13,5 +14,13 @@ if __name__ == "__main__":
         entrypoint="etl_flow.py:etl",
     ).deploy(
         name="etl",
+        work_pool_name="lf-dev",
+    )
+
+    train_model.from_source(
+        source="/opt/prefect/flows/",
+        entrypoint="train_model_flow.py:train_model",
+    ).deploy(
+        name="train_model",
         work_pool_name="lf-dev",
     )
