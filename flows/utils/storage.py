@@ -19,3 +19,10 @@ def get_s3_client():
     else:
         raise Exception(f'Unknown environment: {df_env}')
     return s3_client
+
+
+def filename_with_timestamps(prefix, start_ts, end_ts):
+    """Generate a parquet file name that encodes a time range"""
+    start_str = start_ts.strftime('%Y-%m-%d_%H')
+    end_str = end_ts.strftime('%Y-%m-%d_%H')
+    return f'{prefix}_{start_str}_{end_str}.parquet'

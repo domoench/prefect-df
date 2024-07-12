@@ -1,46 +1,66 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
-from utils.storage import get_s3_client
+from utils.storage import get_s3_client, filename_with_timestamps
 from utils.pandas import print_df_summary
 import requests
 import pandas as pd
 import os
 import io
 
+EIA_MAX_REQUEST_ROWS = 5000
 
-@task()
-def request_EIA_data(start, end, offset, length):
+
+def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
-           'facets[type][]=D&facets[type][]=DF&sort[0][column]=period&'
-           'sort[0][direction]=asc')
+           'sort[0][column]=period&sort[0][direction]=asc')
 
-    params = {
-        'offset': offset,
-        'length': length,
-        'api_key': os.environ['EIA_API_KEY'],
-        'start': start.strftime('%Y-%m-%dT%H'),
-        'end': end.strftime('%Y-%m-%dT%H'),
-    }
+    # Use list of tuples instead of dict to allow duplicate params
+    params = [
+      ('offset', offset),
+      ('length', length),
+      ('api_key', os.environ['EIA_API_KEY']),
+      ('start', start_ts.strftime('%Y-%m-%dT%H')),
+      ('end', end_ts.strftime('%Y-%m-%dT%H')),
+      ('facets[type][]', 'D'),
+      ('facets[type][]', 'DF'),
+    ]
 
     r = requests.get(url, params=params)
     r.raise_for_status()
-    return pd.DataFrame(r.json()['response']['data'])
+    return r
+
+@task
+def get_eia_data_as_df(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
+    r = request_EIA_data(start_ts, end_ts, offset, length)
+    df = pd.DataFrame(r.json()['response']['data'])
+    print(f"  First row: {df.iloc[0]['period']}")
+    print(f"  Last row: {df.iloc[-1]['period']}")
+    return df
 
 
+# TODO Locally, the cache value disappears while the key remains. Leading to
+# the errors like:
+# ValueError: Path /root/.prefect/storage/fde6265e3819476eb8fbcb4f234dc9fc
+# does not exist.
 @task(cache_key_fn=task_input_hash)
-def concurrent_fetch_EIA_data(start, end):
-    time_span = end - start
+def concurrent_fetch_EIA_data(start_ts, end_ts):
+    time_span = end_ts - start_ts
     hours = int(time_span.total_seconds() / 3600)
+
+    # Query EIA to determine exactly how many records match our time range
+    r = request_EIA_data(start_ts, end_ts, 0)
+    num_total_records = int(r.json()['response']['total'])
+    print(f'Total records to fetch: {num_total_records}')
 
     # Calculate how many paginated API requests will be required to fetch all
     # the timeseries data
-    MAX_REQUEST_ROWS = 5000
-    num_full_requests = hours // MAX_REQUEST_ROWS
-    final_request_length = hours % MAX_REQUEST_ROWS
-    print(f'Fetching {hours} hours of data. Start: {start}. End: {end}')
-    print((f'Will make {num_full_requests} {MAX_REQUEST_ROWS}-length requests '
+    num_full_requests = num_total_records // EIA_MAX_REQUEST_ROWS
+    final_request_length = num_total_records % EIA_MAX_REQUEST_ROWS
+    print((f'Fetching {hours} hours of data: {num_total_records} records.\n',
+          f'Start: {start_ts}. End: {end_ts}'))
+    print((f'Will make {num_full_requests} {EIA_MAX_REQUEST_ROWS}-length requests '
            f'and one {final_request_length}-length request.'))
 
     # Make the requests concurrently
@@ -48,16 +68,14 @@ def concurrent_fetch_EIA_data(start, end):
 
     # Initiate the full-length requests
     for i in range(num_full_requests):
-        offset = i * MAX_REQUEST_ROWS
-        result_df_futures.append(request_EIA_data.submit(start, end, offset,
-                                                         MAX_REQUEST_ROWS))
+        offset = i * EIA_MAX_REQUEST_ROWS
+        future = get_eia_data_as_df.submit(start_ts, end_ts, offset)
+        result_df_futures.append(future)
 
-    # Initiate the final remainder request
-    result_df_futures.append(
-        request_EIA_data.submit(start, end,
-                                num_full_requests * MAX_REQUEST_ROWS,
-                                final_request_length)
-    )
+    # Initiate the final request for the remainder records
+    offset = num_full_requests * EIA_MAX_REQUEST_ROWS
+    future = get_eia_data_as_df.submit(start_ts, end_ts, offset, final_request_length)
+    result_df_futures.append(future)
 
     result_dfs = [future.result() for future in result_df_futures]
     api_df = pd.concat(result_dfs)
@@ -65,13 +83,11 @@ def concurrent_fetch_EIA_data(start, end):
 
 
 @task
-def extract():
+def extract(start_ts, end_ts):
     print("Fetching EIA electricty demand timeseries.")
 
     # Calculate the number of rows to fetch from the API between start and end
-    start = pd.to_datetime('2015-07-01 05:00:00+00:00')
-    end = pd.to_datetime('2024-06-28 04:00:00+00:00')
-    eia_df = concurrent_fetch_EIA_data(start, end)
+    eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
 
     print_df_summary(eia_df)
 
@@ -86,20 +102,48 @@ def transform(eia_df):
     eia_df['UTC period'] = pd.to_datetime(eia_df['period'], utc=True)
     eia_df['value'] = pd.to_numeric(eia_df['value'])
 
-    # In the EIA API response, for any given hour, there is 1 rows for D value
-    # and another for the DF value. Update dataframe to have 1 row, with 2
-    # columns: D and DF. Units are MWh.
+    # Careful, EIA results can have duplicates (at the boundaries of the pages)
+    # And such behavior seems to be non-deterministic.
+    # Remove duplicates
+    eia_df = eia_df.drop_duplicates(subset=['UTC period', 'value', 'type'])
+
+    # In the EIA API response, for any given hour, there are between 0 and 2 records:
+    # 1 record for D value, and another for the DF value. Update dataframe to have 1 row
+    # for each hour, with 2 columns: D and DF. Units are MWh.
     demand_df = eia_df[eia_df.type == 'D']
     d_forecast_df = eia_df[eia_df.type == 'DF']
-    eia_df = pd.merge(
-        demand_df[['UTC period', 'respondent', 'value']].rename(columns={'value': 'D'}),
+
+    # Create base dataframe with a timestamp for every hour in the range
+    start_ts = eia_df['UTC period'].min()
+    end_ts = eia_df['UTC period'].max()
+    dt_df = pd.DataFrame({'utc_ts': pd.date_range(start=start_ts, end=end_ts, freq='h')})
+
+    # Merge in the demand timeseries
+    merge_df = pd.merge(
+        dt_df,
+        demand_df[["UTC period", "respondent", "value"]].rename(columns={"value": "D"}),
+        left_on="utc_ts",
+        right_on="UTC period",
+        how="left",
+    )
+
+    # Merge in the demand forecast timeseries
+    merge_df = pd.merge(
+        merge_df,
         d_forecast_df[['UTC period', 'value']].rename(columns={'value': 'DF'}),
-        on='UTC period')
+        left_on='utc_ts', right_on='UTC period',
+        how='left'
+    )
+
+    merge_df = merge_df.drop(columns=['UTC period_x', 'UTC period_y'])
+
+    # Set timestamp as index
+    merge_df = merge_df.set_index('utc_ts')
 
     # TODO: Imputation? Or save that for later down the pipe?
 
-    print_df_summary(eia_df)
-    return eia_df
+    print_df_summary(merge_df)
+    return merge_df
 
 
 @task
@@ -111,9 +155,9 @@ def load(df):
     buff.seek(0)  # Reset buffer position to the beginning
 
     # Encode start and end times into file name
-    start_str = df['UTC period'].min().strftime('%Y-%m-%d_%H')
-    end_str = df['UTC period'].max().strftime('%Y-%m-%d_%H')
-    filename = f'eia_d_df_{start_str}_{end_str}.parquet'
+    start_ts = df.index.min()
+    end_ts = df.index.max()
+    filename = filename_with_timestamps('eia_d_df', start_ts, end_ts)
     bucket = os.environ['TIMESERIES_BUCKET_NAME']
 
     # Write to S3
@@ -127,6 +171,10 @@ def etl():
     """Pulls all available hourly EIA demand data up to the last XXXday and
     persists it in the S3 data warehouse as a parquet file.
     """
-    df = extract()
+    # TODO parametarize the dataset time interval
+    start_ts = pd.to_datetime('2015-07-01 05:00:00+00:00')
+    end_ts = pd.to_datetime('2024-06-28 04:00:00+00:00')
+
+    df = extract(start_ts, end_ts)
     df = transform(df)
     load(df)
