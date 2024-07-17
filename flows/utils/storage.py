@@ -21,7 +21,7 @@ def get_s3_client():
     return s3_client
 
 
-def filename_with_timestamps(prefix, start_ts, end_ts):
+def obj_key_with_timestamps(prefix, start_ts, end_ts):
     """Generate a parquet file name that encodes a time range"""
     start_str = start_ts.strftime('%Y-%m-%d_%H')
     end_str = end_ts.strftime('%Y-%m-%d_%H')
