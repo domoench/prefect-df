@@ -2,6 +2,8 @@
 Module containing logic for getting and persisting data, and feature engineering.
 """
 
+TIME_FEATURES = ['hour', 'month', 'year', 'quarter', 'dayofweek', 'dayofmonth', 'dayofyear']
+
 
 def add_temporal_features(df):
     """Given a DataFrame with a datetime index, return a copy with
