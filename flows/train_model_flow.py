@@ -1,7 +1,11 @@
 from prefect import flow, task
 from utils.storage import get_s3_client, obj_key_with_timestamps
 from utils.pandas import print_df_summary
-from core.data import add_temporal_features
+from core.data import (
+    add_temporal_features,
+    cap_column_outliers,
+    impute_null_demand_values,
+)
 import pandas as pd
 import io
 import os
@@ -27,6 +31,17 @@ def get_data(start_ts, end_ts):
 
 
 @task
+def clean_data(df):
+    """Cap outliers and impute null values"""
+    # Cap threshold values determined from PJM demand data between 2015 and 2024
+    MAX_D_VAL = 165_000
+    MIN_D_VAL = 60_000
+    df = cap_column_outliers(df, 'D', MIN_D_VAL, MAX_D_VAL)
+    df = impute_null_demand_values(df)
+    return df
+
+
+@task
 def features(df):
     # Add temporal features
     df = add_temporal_features(df)
@@ -47,6 +62,7 @@ def train_model(log_prints=True):
 
     # Get data
     df = get_data(start_ts, end_ts)
+    df = clean_data(df)
 
     # TODO: Feature Engineering
     df = features(df)

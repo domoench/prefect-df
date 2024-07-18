@@ -1,5 +1,7 @@
 #!/bin/bash
 
+export PYTHONPATH="/opt/prefect:${PYTHONPATH}"
+
 # Register flow deployments with prefect server
 echo "Deploying flows."
 python /opt/prefect/flows/deploy_flows.py
