@@ -1,13 +1,15 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
-from utils.storage import get_s3_client, filename_with_timestamps
+from utils.storage import get_s3_client, filename_with_timestamps, df_to_parquet_buff
 from utils.pandas import print_df_summary
 from core.logging import get_logger
 import requests
 import pandas as pd
 import os
-import io
 
+# TODO: Now that I've learned I can't log to prefect UI from my core module
+# is there any more benefit to this logging abstraction? Inside flow/task code
+# should I use print statements or the prefect logger?
 lg = get_logger()
 
 EIA_MAX_REQUEST_ROWS = 5000
@@ -33,6 +35,7 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     r = requests.get(url, params=params)
     r.raise_for_status()
     return r
+
 
 @task
 def get_eia_data_as_df(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
@@ -152,10 +155,8 @@ def transform(eia_df):
 @task
 def load(df):
     print("Loading timeseries into warehouse.")
-    # Convert dataframe to parquet file
-    buff = io.BytesIO()
-    df.to_parquet(buff)
-    buff.seek(0)  # Reset buffer position to the beginning
+    # Serialize
+    df_buff = df_to_parquet_buff(df)
 
     # Encode start and end times into file name
     start_ts = df.index.min()
@@ -165,7 +166,7 @@ def load(df):
 
     # Write to S3
     s3 = get_s3_client()
-    s3.upload_fileobj(buff, bucket, filename)
+    s3.upload_fileobj(df_buff, bucket, filename)
     print(f'Uploaded {bucket}/{filename}.')
 
 

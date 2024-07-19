@@ -1,6 +1,9 @@
 from prefect import flow, task
-from utils.storage import get_s3_client, obj_key_with_timestamps
-from utils.pandas import print_df_summary
+from utils.storage import (
+    get_s3_client,
+    obj_key_with_timestamps,
+    model_to_pickle_buff,
+)
 from core.data import (
     add_temporal_features,
     cap_column_outliers,
@@ -58,6 +61,14 @@ def features(df):
     return df
 
 
+@task
+def persist_model(model, filename):
+    s3 = get_s3_client()
+    model_buff = model_to_pickle_buff(model)
+    s3.upload_fileobj(model_buff, 'models', filename)
+    lg.info(model)
+
+
 # TODO: parameterize hyperparam tuning option. Use pydantic?
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
@@ -73,9 +84,10 @@ def train_model(log_prints=True):
     # Feature Engineering
     df = features(df)
 
-    # Cross validation
-    # Optional Hyper param tuning
-    reg = train_xgboost(df)
+    # Cross validation training
+    # TODO: Parameterize Optional Hyper param tuning
+    reg = train_xgboost(df, hyperparam_tuning=False)
 
-    # TODO persist model
-    lg.info(reg)
+    # TODO emit performance metrics
+
+    persist_model(reg, 'model.pkl')

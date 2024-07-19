@@ -1,5 +1,7 @@
 import boto3
 import os
+import io
+import pickle
 
 
 def get_s3_client():
@@ -26,3 +28,20 @@ def obj_key_with_timestamps(prefix, start_ts, end_ts):
     start_str = start_ts.strftime('%Y-%m-%d_%H')
     end_str = end_ts.strftime('%Y-%m-%d_%H')
     return f'{prefix}_{start_str}_{end_str}.parquet'
+
+
+def df_to_parquet_buff(df):
+    """Serialize the given dataframe in parquet format in an in-memory buffer"""
+    buff = io.BytesIO()
+    df.to_parquet(buff)
+    buff.seek(0)  # Reset buffer position to the beginning
+    return buff
+
+
+def model_to_pickle_buff(model):
+    """Serialize the given fitted model, via pickle, into an in-memory buffer.
+    Assumption: The model implements sklearn's Predictor interface."""
+    buff = io.BytesIO()
+    pickle.dump(model, buff)
+    buff.seek(0)
+    return buff
