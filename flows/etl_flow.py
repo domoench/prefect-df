@@ -2,16 +2,19 @@ from prefect import flow, task
 from prefect.tasks import task_input_hash
 from utils.storage import get_s3_client, filename_with_timestamps
 from utils.pandas import print_df_summary
+from core.logging import get_logger
 import requests
 import pandas as pd
 import os
 import io
 
+lg = get_logger()
+
 EIA_MAX_REQUEST_ROWS = 5000
 
 
 def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
-    print(f'Fetching API page. offset:{offset}. length:{length}')
+    lg.info(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
            'sort[0][column]=period&sort[0][direction]=asc')
@@ -35,8 +38,8 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
 def get_eia_data_as_df(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     r = request_EIA_data(start_ts, end_ts, offset, length)
     df = pd.DataFrame(r.json()['response']['data'])
-    print(f"  First row: {df.iloc[0]['period']}")
-    print(f"  Last row: {df.iloc[-1]['period']}")
+    lg.info(f"  First row: {df.iloc[0]['period']}")
+    lg.info(f"  Last row: {df.iloc[-1]['period']}")
     return df
 
 
@@ -52,15 +55,15 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
     # Query EIA to determine exactly how many records match our time range
     r = request_EIA_data(start_ts, end_ts, 0)
     num_total_records = int(r.json()['response']['total'])
-    print(f'Total records to fetch: {num_total_records}')
+    lg.info(f'Total records to fetch: {num_total_records}')
 
     # Calculate how many paginated API requests will be required to fetch all
     # the timeseries data
     num_full_requests = num_total_records // EIA_MAX_REQUEST_ROWS
     final_request_length = num_total_records % EIA_MAX_REQUEST_ROWS
-    print((f'Fetching {hours} hours of data: {num_total_records} records.\n',
+    lg.info((f'Fetching {hours} hours of data: {num_total_records} records.\n',
           f'Start: {start_ts}. End: {end_ts}'))
-    print((f'Will make {num_full_requests} {EIA_MAX_REQUEST_ROWS}-length requests '
+    lg.info((f'Will make {num_full_requests} {EIA_MAX_REQUEST_ROWS}-length requests '
            f'and one {final_request_length}-length request.'))
 
     # Make the requests concurrently
@@ -84,7 +87,7 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
 
 @task
 def extract(start_ts, end_ts):
-    print("Fetching EIA electricty demand timeseries.")
+    lg.info("Fetching EIA electricty demand timeseries.")
 
     # Calculate the number of rows to fetch from the API between start and end
     eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
@@ -96,7 +99,7 @@ def extract(start_ts, end_ts):
 
 @task
 def transform(eia_df):
-    print('Transforming timeseries.')
+    lg.info('Transforming timeseries.')
 
     # Convert types
     eia_df['UTC period'] = pd.to_datetime(eia_df['period'], utc=True)

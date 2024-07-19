@@ -6,9 +6,13 @@ from core.data import (
     cap_column_outliers,
     impute_null_demand_values,
 )
+from core.model import train_xgboost
+from core.logging import get_logger
 import pandas as pd
 import io
 import os
+
+lg = get_logger()
 
 
 @task
@@ -22,11 +26,11 @@ def get_data(start_ts, end_ts):
     s3 = get_s3_client()
     bucket = os.environ['TIMESERIES_BUCKET_NAME']
     object_key = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
-    print(f'Getting object: {bucket}/{object_key}.')
+    lg.info(f'Getting object: {bucket}/{object_key}.')
     s3.download_fileobj(bucket, object_key, buff)
     buff.seek(0)
     df = pd.read_parquet(buff)
-    print_df_summary(df)
+    lg.info(df)
     return df
 
 
@@ -50,10 +54,12 @@ def features(df):
     # Haven't decided yet if that will be interesting, or just training my model
     # to copy EIA's model.
     df = df.drop(columns=['DF'])
-    print_df_summary(df)
+    lg.info(df)
     return df
 
 
+# TODO: parameterize hyperparam tuning option. Use pydantic?
+# https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
 def train_model(log_prints=True):
     # TODO: Determine training end date (un-hardcode)
@@ -64,9 +70,12 @@ def train_model(log_prints=True):
     df = get_data(start_ts, end_ts)
     df = clean_data(df)
 
-    # TODO: Feature Engineering
+    # Feature Engineering
     df = features(df)
 
-    # TODO: Train/Test Split
+    # Cross validation
+    # Optional Hyper param tuning
+    reg = train_xgboost(df)
 
-    # TODO: Train Model
+    # TODO persist model
+    lg.info(reg)
