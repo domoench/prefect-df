@@ -1,5 +1,6 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
+from prefect.blocks.system import Secret
 from utils.storage import get_s3_client, obj_key_with_timestamps, df_to_parquet_buff
 from utils.pandas import print_df_summary
 from core.logging import get_logger
@@ -8,6 +9,8 @@ import requests
 import pandas as pd
 import os
 from datetime import datetime
+from dvc.repo import Repo as DvcRepo
+from git import Repo as GitRepo
 
 # TODO: Now that I've learned I can't log to prefect UI from my core module
 # is there any more benefit to this logging abstraction? Inside flow/task code
@@ -89,7 +92,7 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
 
 
 @task
-def extract(start_ts, end_ts):
+def extract(start_ts: datetime, end_ts: datetime):
     lg.info("Fetching EIA electricty demand timeseries.")
 
     # Calculate the number of rows to fetch from the API between start and end
@@ -101,7 +104,7 @@ def extract(start_ts, end_ts):
 
 
 @task
-def transform(eia_df):
+def transform(eia_df: pd.DataFrame):
     lg.info('Transforming timeseries.')
 
     # Convert types
@@ -153,21 +156,48 @@ def transform(eia_df):
 
 
 @task
-def load(df):
+def load(df: pd.DataFrame):
     print("Loading timeseries into warehouse.")
-    # Serialize
-    df_buff = df_to_parquet_buff(df)
+    # TODO: Add check that temp directory doesn't already exist, and clean up at end
+    # TODO what if dataset is already present and tracked (eg if you ran this twice in a row within an hour)
 
-    # Encode start and end times into file name
+    github_PAT = Secret.load("github-pat-dvc-dev").get()
+    github_username = os.getenv('DVC_GIT_USERNAME')
+    github_reponame = os.getenv('DVC_GIT_REPONAME')
+    git_repo_url = f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
+
+    local_dvc_repo = os.getenv('DVC_LOCAL_REPO_PATH')
+    git_repo = GitRepo.clone_from(git_repo_url, local_dvc_repo)
+    dvc_repo = DvcRepo(local_dvc_repo)
+
+    # Write dataset file into local repo
     start_ts = df.index.min()
     end_ts = df.index.max()
     filename = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
-    bucket = os.environ['TIMESERIES_BUCKET_NAME']
+    dataset_path = f'{local_dvc_repo}/data/{filename}'
+    df.to_parquet(dataset_path)
 
-    # Write to S3
-    s3 = get_s3_client()
-    s3.upload_fileobj(df_buff, bucket, filename)
-    print(f'Uploaded {bucket}/{filename}.')
+    # Add dataset to dvc tracking
+    dvc_repo.add(dataset_path)
+
+    # Save dataset file to S3 # TODO: Need to do manually? Or will add do it?
+    # s3 = get_s3_client()
+    # bucket = os.environ['TIMESERIES_BUCKET_NAME']
+    # with open(dataset_path, 'rb') as data:
+    #     s3.upload_fileobj(data, bucket, filename)
+    # print(f'Uploaded {bucket}/{filename}.')
+
+    # Git Tracking
+    git_repo.git.add(f'{dataset_path}.dvc')
+    git_repo.git.add(f'{local_dvc_repo}/data/.gitignore')
+    commit_msg = f"Add dataset. End ts: {end_ts.strftime('%Y-%m-%d_%H')}"  # TODO better message
+    git_repo.index.commit(commit_msg)
+    git_repo.remote(name='origin').push()
+
+    # Push dataset to DVC remote storage
+    dvc_repo.push()
+
+    # Cleanup
 
 
 # @validate_arguments

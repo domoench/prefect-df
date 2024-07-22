@@ -12,6 +12,9 @@ prefect = "2.19.7 "
 pyarrow = "*"
 xgboost = "*"
 scikit-learn = "*"
+dvc = "*"
+dvc-s3 = "*"
+gitpython = "*"
 
 [dev-packages]
 flake8 = "*"
