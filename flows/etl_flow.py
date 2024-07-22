@@ -1,11 +1,13 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
-from utils.storage import get_s3_client, filename_with_timestamps, df_to_parquet_buff
+from utils.storage import get_s3_client, obj_key_with_timestamps, df_to_parquet_buff
 from utils.pandas import print_df_summary
 from core.logging import get_logger
+from consts import EIA_EARLIEST_HOUR_UTC
 import requests
 import pandas as pd
 import os
+from datetime import datetime
 
 # TODO: Now that I've learned I can't log to prefect UI from my core module
 # is there any more benefit to this logging abstraction? Inside flow/task code
@@ -41,8 +43,6 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
 def get_eia_data_as_df(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     r = request_EIA_data(start_ts, end_ts, offset, length)
     df = pd.DataFrame(r.json()['response']['data'])
-    lg.info(f"  First row: {df.iloc[0]['period']}")
-    lg.info(f"  Last row: {df.iloc[-1]['period']}")
     return df
 
 
@@ -161,7 +161,7 @@ def load(df):
     # Encode start and end times into file name
     start_ts = df.index.min()
     end_ts = df.index.max()
-    filename = filename_with_timestamps('eia_d_df', start_ts, end_ts)
+    filename = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
     bucket = os.environ['TIMESERIES_BUCKET_NAME']
 
     # Write to S3
@@ -170,15 +170,13 @@ def load(df):
     print(f'Uploaded {bucket}/{filename}.')
 
 
+# @validate_arguments
 @flow(log_prints=True)
-def etl():
-    """Pulls all available hourly EIA demand data up to the last XXXday and
-    persists it in the S3 data warehouse as a parquet file.
+def etl(start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
+        end_ts: datetime = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(weeks=1)).to_pydatetime()):
+    """Pulls all available hourly EIA demand data between the given start and end
+    timestamps and persists it in the S3 data warehouse as a parquet file.
     """
-    # TODO parametarize the dataset time interval
-    start_ts = pd.to_datetime('2015-07-01 05:00:00+00:00')
-    end_ts = pd.to_datetime('2024-06-28 04:00:00+00:00')
-
     df = extract(start_ts, end_ts)
     df = transform(df)
     load(df)
