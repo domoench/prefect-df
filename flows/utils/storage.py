@@ -2,6 +2,7 @@ import boto3
 import os
 import io
 import pickle
+import shutil
 
 
 def get_s3_client():
@@ -45,3 +46,17 @@ def model_to_pickle_buff(model):
     pickle.dump(model, buff)
     buff.seek(0)
     return buff
+
+
+def ensure_empty_dir(dir_path):
+    """Ensure the given directory exists and is empty"""
+    directory = os.path.dirname(dir_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+    else:
+        for filename in os.listdir(directory):
+            file_path = os.path.join(directory, filename)
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)

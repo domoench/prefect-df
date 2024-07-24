@@ -1,7 +1,10 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
 from prefect.blocks.system import Secret
-from utils.storage import get_s3_client, obj_key_with_timestamps, df_to_parquet_buff
+from utils.storage import (
+    obj_key_with_timestamps,
+    ensure_empty_dir,
+)
 from utils.pandas import print_df_summary
 from core.logging import get_logger
 from consts import EIA_EARLIEST_HOUR_UTC
@@ -18,7 +21,6 @@ from git import Repo as GitRepo
 lg = get_logger()
 
 EIA_MAX_REQUEST_ROWS = 5000
-
 
 def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     lg.info(f'Fetching API page. offset:{offset}. length:{length}')
@@ -157,20 +159,23 @@ def transform(eia_df: pd.DataFrame):
 
 @task
 def load(df: pd.DataFrame):
-    print("Loading timeseries into warehouse.")
-    # TODO: Add check that temp directory doesn't already exist, and clean up at end
-    # TODO what if dataset is already present and tracked (eg if you ran this twice in a row within an hour)
+    lg.info('Loading timeseries into warehouse.')
 
-    github_PAT = Secret.load("github-pat-dvc-dev").get()
+    # Ensure clean local git/dvc repo directory
+    local_dvc_repo = os.getenv('DVC_LOCAL_REPO_PATH')
+    ensure_empty_dir(local_dvc_repo)
+
+    # Clone the git repo
+    github_PAT = Secret.load('github-pat-dvc-dev').get()
     github_username = os.getenv('DVC_GIT_USERNAME')
     github_reponame = os.getenv('DVC_GIT_REPONAME')
     git_repo_url = f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
 
-    local_dvc_repo = os.getenv('DVC_LOCAL_REPO_PATH')
+    # Initialize git and dvc python client instances
     git_repo = GitRepo.clone_from(git_repo_url, local_dvc_repo)
     dvc_repo = DvcRepo(local_dvc_repo)
 
-    # Write dataset file into local repo
+    # Write dataset file into local directory
     start_ts = df.index.min()
     end_ts = df.index.max()
     filename = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
@@ -180,24 +185,25 @@ def load(df: pd.DataFrame):
     # Add dataset to dvc tracking
     dvc_repo.add(dataset_path)
 
-    # Save dataset file to S3 # TODO: Need to do manually? Or will add do it?
-    # s3 = get_s3_client()
-    # bucket = os.environ['TIMESERIES_BUCKET_NAME']
-    # with open(dataset_path, 'rb') as data:
-    #     s3.upload_fileobj(data, bucket, filename)
-    # print(f'Uploaded {bucket}/{filename}.')
-
     # Git Tracking
     git_repo.git.add(f'{dataset_path}.dvc')
     git_repo.git.add(f'{local_dvc_repo}/data/.gitignore')
-    commit_msg = f"Add dataset. End ts: {end_ts.strftime('%Y-%m-%d_%H')}"  # TODO better message
-    git_repo.index.commit(commit_msg)
-    git_repo.remote(name='origin').push()
 
-    # Push dataset to DVC remote storage
-    dvc_repo.push()
+    diffs = git_repo.index.diff(None)
+    diff_files = list(map(lambda d: d.a_path, diffs))
+    if len(diff_files) > 0:
+        lg.info(f'Staged files: {diff_files}')
 
-    # Cleanup
+        lg.info('Git commiting')
+        commit_msg = f"Add dataset. End ts: {end_ts.strftime('%Y-%m-%d_%H')}"  # TODO better message
+        git_repo.index.commit(commit_msg)
+        git_repo.remote(name='origin').push()
+
+        lg.info('Pushing dataset to DVC remote storage')
+        # Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+        dvc_repo.push()
+    else:
+        lg.info('No dataset changes.')
 
 
 # @validate_arguments
