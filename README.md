@@ -1,15 +1,17 @@
-A small ML pipeline to produce a model that forecasts electricity demand for the
-PJM balancing authority.
+An automated ML pipeline to forecast electricity demand for the PJM balancing authority.
 
 # Goal
 
 The goal of this project is to demonstrate:
 - ML Ops
     - ML workflow orchestration.
-    - Dataset versioning.
-    - Model versioning and experiment tracking.
-    - Isolation between deveopment and deployed environment infrastructure.
+    - Versioning
+        - Dataset versioning.
+        - Model versioning and experiment tracking.
+    - Isolation between development and deployed environment infrastructure.
+    - Model performance comparisons to baseline
 - ML
+    - Timeseries feature engineering
     - Timeseries forecasting with XGBoost
 
 # Data
@@ -22,7 +24,7 @@ demand data.
 Stack
 - [X] Prefect (ML Workflow Orchestration)
 - [ ] MLFlow
-- [ ] DVC
+- [X] DVC
 - [X] XGBoost
 
 # References
