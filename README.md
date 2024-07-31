@@ -1,6 +1,10 @@
 A small ML pipeline to produce a model that forecasts electricity demand for the
 PJM balancing authority.
 
+<img 
+    src="https://github.com/user-attachments/assets/efd0d3b8-3d4c-4d50-a93b-0009093ca0e9"
+    alt="Predicted vs. true electricity demand timeseries"
+    width="400">
 # Goal
 
 The goal of this project is to demonstrate:
