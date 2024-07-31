@@ -26,6 +26,7 @@ demand data.
 
 # Stack
 
+- [X] Docker Compose Dev Environment
 - [X] Prefect (ML Workflow Orchestration)
 - [ ] MLFlow
 - [X] DVC
