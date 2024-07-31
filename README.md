@@ -26,7 +26,6 @@ demand data.
 
 # Stack
 
-Stack
 - [X] Prefect (ML Workflow Orchestration)
 - [ ] MLFlow
 - [X] DVC
