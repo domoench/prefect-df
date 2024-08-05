@@ -24,6 +24,15 @@ services:
       - 9000:9000
       - 9001:9001
 
+  # MLFlow Tracking server
+  mlflow:
+    build:
+      context: ./mlflow
+    env_file:
+      - .env
+    ports:
+      - 5001:5001
+
 volumes:
   minio:
 networks:

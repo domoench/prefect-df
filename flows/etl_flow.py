@@ -166,6 +166,7 @@ def load(df: pd.DataFrame):
     ensure_empty_dir(local_dvc_repo)
 
     # Clone the git repo
+    # TODO: Pull this dvc repo name generation into function. Used in 2 places now.
     github_PAT = Secret.load('github-pat-dvc-dev').get()
     github_username = os.getenv('DVC_GIT_USERNAME')
     github_reponame = os.getenv('DVC_GIT_REPONAME')
@@ -198,6 +199,7 @@ def load(df: pd.DataFrame):
         commit_msg = f"Add dataset. End ts: {end_ts.strftime('%Y-%m-%d_%H')}"  # TODO better message
         git_repo.index.commit(commit_msg)
         git_repo.remote(name='origin').push()
+        # TODO git tags?
 
         lg.info('Pushing dataset to DVC remote storage')
         # Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY

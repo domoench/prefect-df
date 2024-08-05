@@ -15,6 +15,7 @@ scikit-learn = "*"
 dvc = "*"
 dvc-s3 = "*"
 gitpython = "*"
+mlflow = "*"
 
 [dev-packages]
 flake8 = "*"

@@ -1,4 +1,5 @@
 from prefect import flow, task
+from prefect.blocks.system import Secret
 from utils.storage import (
     get_s3_client,
     obj_key_with_timestamps,
@@ -14,6 +15,8 @@ from core.logging import get_logger
 import pandas as pd
 import io
 import os
+import mlflow
+import dvc.api
 
 lg = get_logger()
 
@@ -22,18 +25,22 @@ lg = get_logger()
 def get_data(start_ts, end_ts):
     """Get training data covering every hour between start and end timestamps.
     """
+    # TODO start and end ts are no longer used. Decide how you want to specify dataset.
     # TODO: Check data warehouse for appropriate data file. If not present,
     # kick off the ETL flow.
     # For now assume it is there.
-    buff = io.BytesIO()
-    s3 = get_s3_client()
-    bucket = os.environ['TIMESERIES_BUCKET_NAME']
-    object_key = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
-    lg.info(f'Getting object: {bucket}/{object_key}.')
-    s3.download_fileobj(bucket, object_key, buff)
-    buff.seek(0)
-    df = pd.read_parquet(buff)
-    lg.info(df)
+    # TODO: Pull dvc repo name generation into function. Used in 2 places now.
+    github_PAT = Secret.load('github-pat-dvc-dev').get()
+    github_username = os.getenv('DVC_GIT_USERNAME')
+    github_reponame = os.getenv('DVC_GIT_REPONAME')
+    git_repo_url = f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
+    with dvc.api.open(
+        # TODO Dynamically pull path
+        path='data/eia_d_df_2015-07-01_05_2024-07-17_14.parquet',
+        repo=git_repo_url,
+        mode='rb'
+    ) as f:
+        df = pd.read_parquet(f)
     return df
 
 
@@ -83,6 +90,14 @@ def train_model(log_prints=True):
 
     # Feature Engineering
     df = features(df)
+
+    # MLFlow Tracking
+    mlflow_url = os.getenv('MLFLOW_ENDPOINT_URL')
+    mlflow.set_tracking_uri(uri=mlflow_url)
+    mlflow.set_experiment("XGBoost Demand Forecast")
+    mlflow.xgboost.autolog()
+    # TODO autolog logs as cross validation trainings a separate runs by default.
+    # As is, can't group these mlflow runs by prefect run. Add prefect run tag?
 
     # Cross validation training
     # TODO: Parameterize Optional Hyper param tuning
