@@ -1,9 +1,9 @@
 from prefect import flow, task, runtime
-from prefect.blocks.system import Secret
 from utils.storage import (
     get_s3_client,
     obj_key_with_timestamps,
     model_to_pickle_buff,
+    get_dvc_remote_repo_url,
 )
 from core.data import (
     add_temporal_features,
@@ -28,15 +28,10 @@ def get_data(start_ts, end_ts):
     # TODO: Check data warehouse for appropriate data file. If not present,
     # kick off the ETL flow.
     # For now assume it is there.
-    # TODO: Pull dvc repo name generation into function. Used in 2 places now.
-    github_PAT = Secret.load('github-pat-dvc-dev').get()
-    github_username = os.getenv('DVC_GIT_USERNAME')
-    github_reponame = os.getenv('DVC_GIT_REPONAME')
-    git_repo_url = f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
     with dvc.api.open(
         # TODO Dynamically pull path
         path='data/eia_d_df_2015-07-01_05_2024-07-17_14.parquet',
-        repo=git_repo_url,
+        repo=get_dvc_remote_repo_url(),
         mode='rb'
     ) as f:
         df = pd.read_parquet(f)

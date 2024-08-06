@@ -3,6 +3,7 @@ import os
 import io
 import pickle
 import shutil
+from prefect.blocks.system import Secret
 
 
 def get_s3_client():
@@ -60,3 +61,10 @@ def ensure_empty_dir(dir_path):
                 os.unlink(file_path)
             elif os.path.isdir(file_path):
                 shutil.rmtree(file_path)
+
+
+def get_dvc_remote_repo_url():
+    github_PAT = Secret.load('github-pat-dvc-dev').get()
+    github_username = os.getenv('DVC_GIT_USERNAME')
+    github_reponame = os.getenv('DVC_GIT_REPONAME')
+    return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'

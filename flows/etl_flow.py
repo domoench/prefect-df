@@ -4,6 +4,7 @@ from prefect.blocks.system import Secret
 from utils.storage import (
     obj_key_with_timestamps,
     ensure_empty_dir,
+    get_dvc_remote_repo_url,
 )
 from utils.pandas import print_df_summary
 from core.logging import get_logger
@@ -21,6 +22,7 @@ from git import Repo as GitRepo
 lg = get_logger()
 
 EIA_MAX_REQUEST_ROWS = 5000
+
 
 def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     lg.info(f'Fetching API page. offset:{offset}. length:{length}')
@@ -166,11 +168,7 @@ def load(df: pd.DataFrame):
     ensure_empty_dir(local_dvc_repo)
 
     # Clone the git repo
-    # TODO: Pull this dvc repo name generation into function. Used in 2 places now.
-    github_PAT = Secret.load('github-pat-dvc-dev').get()
-    github_username = os.getenv('DVC_GIT_USERNAME')
-    github_reponame = os.getenv('DVC_GIT_REPONAME')
-    git_repo_url = f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
+    git_repo_url = get_dvc_remote_repo_url()
 
     # Initialize git and dvc python client instances
     git_repo = GitRepo.clone_from(git_repo_url, local_dvc_repo)
