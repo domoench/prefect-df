@@ -3,3 +3,4 @@
 data/*
 .virtual_documents/
 /eia_d_df_2015-07-01_05_2024-06-28_04.parquet
+flows/mlruns/

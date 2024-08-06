@@ -1,4 +1,4 @@
-from prefect import flow, task
+from prefect import flow, task, runtime
 from prefect.blocks.system import Secret
 from utils.storage import (
     get_s3_client,
@@ -13,7 +13,6 @@ from core.data import (
 from core.model import train_xgboost
 from core.logging import get_logger
 import pandas as pd
-import io
 import os
 import mlflow
 import dvc.api
@@ -92,17 +91,13 @@ def train_model(log_prints=True):
     df = features(df)
 
     # MLFlow Tracking
-    mlflow_url = os.getenv('MLFLOW_ENDPOINT_URL')
-    mlflow.set_tracking_uri(uri=mlflow_url)
-    mlflow.set_experiment("XGBoost Demand Forecast")
+    mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
+    mlflow.set_experiment('XGBoost Demand Forecast')
+    mlflow.set_tag('prefect_flow_run', runtime.flow_run.name)
     mlflow.xgboost.autolog()
-    # TODO autolog logs as cross validation trainings a separate runs by default.
-    # As is, can't group these mlflow runs by prefect run. Add prefect run tag?
 
     # Cross validation training
     # TODO: Parameterize Optional Hyper param tuning
     reg = train_xgboost(df, hyperparam_tuning=False)
-
-    # TODO emit performance metrics
 
     persist_model(reg, 'model.pkl')
