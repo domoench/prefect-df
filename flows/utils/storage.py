@@ -6,6 +6,7 @@ import shutil
 import dvc.api
 import pandas as pd
 from prefect.blocks.system import Secret
+from core.types import DVCDatasetInfo
 
 
 def get_s3_client():
@@ -72,11 +73,11 @@ def get_dvc_remote_repo_url():
     return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
 
 
-def get_dvc_datset_as_df(dvc_dataset_info):
+def get_dvc_datset_as_df(dvc_dataset_info: DVCDatasetInfo):
     data_bytes = dvc.api.read(
-        path=dvc_dataset_info['path'],
-        repo=dvc_dataset_info['repo'],
-        rev=dvc_dataset_info['rev'],
+        path=dvc_dataset_info.path,
+        repo=dvc_dataset_info.repo,
+        rev=dvc_dataset_info.rev,
         mode='rb'
     )
     data_file_like = io.BytesIO(data_bytes)

@@ -9,6 +9,7 @@ from core.data import (
     cap_column_outliers,
     impute_null_demand_values,
 )
+from core.types import DVCDatasetInfo
 from core.model import train_xgboost
 import os
 import mlflow
@@ -50,7 +51,7 @@ def persist_model(model, filename):
 # TODO: parameterize hyperparam tuning option. Use pydantic?
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
-def train_model(dvc_dataset_info: dict | None, log_prints=True):
+def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     """Train an XGBoost timeseries forecasting model
 
     Args:

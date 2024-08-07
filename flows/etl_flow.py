@@ -4,9 +4,11 @@ from utils.storage import (
     obj_key_with_timestamps,
     ensure_empty_dir,
     get_dvc_remote_repo_url,
-    get_dvc_data_url,
 )
 from utils.pandas import print_df_summary
+from core.types import (
+    DVCDatasetInfo,
+)
 from consts import EIA_EARLIEST_HOUR_UTC
 import requests
 import pandas as pd
@@ -154,7 +156,7 @@ def transform(eia_df: pd.DataFrame):
 
 
 @task
-def load_to_dvc(df: pd.DataFrame):
+def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
     print('Loading timeseries into warehouse.')
 
     # Ensure clean local git/dvc repo directory
@@ -205,12 +207,11 @@ def load_to_dvc(df: pd.DataFrame):
         git_commit_hash = str(git_repo.head.commit)
         print(f'No dataset changes. Using HEAD as commit hash: {git_commit_hash}')
 
-    dvc_data_info = {
-        'repo': git_repo_url,
-        'path': dvc_dataset_path,
-        'rev': git_commit_hash,
-    }
-    return dvc_data_info
+    return DVCDatasetInfo(
+        repo=git_repo_url,
+        path=dvc_dataset_path,
+        rev=git_commit_hash,
+    )
 
 
 @flow(log_prints=True)
