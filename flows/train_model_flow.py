@@ -2,7 +2,7 @@ from prefect import flow, task, runtime
 from utils.storage import (
     get_s3_client,
     model_to_pickle_buff,
-    get_dvc_remote_repo_url,
+    get_dvc_datset_as_df,
 )
 from core.data import (
     add_temporal_features,
@@ -10,28 +10,8 @@ from core.data import (
     impute_null_demand_values,
 )
 from core.model import train_xgboost
-import pandas as pd
 import os
 import mlflow
-import dvc.api
-
-
-@task
-def get_data(start_ts, end_ts):
-    """Get training data covering every hour between start and end timestamps.
-    """
-    # TODO start and end ts are no longer used. Decide how you want to specify dataset.
-    # TODO: Check data warehouse for appropriate data file. If not present,
-    # kick off the ETL flow.
-    # For now assume it is there.
-    with dvc.api.open(
-        # TODO Dynamically pull path
-        path='data/eia_d_df_2015-07-01_05_2024-07-17_14.parquet',
-        repo=get_dvc_remote_repo_url(),
-        mode='rb'
-    ) as f:
-        df = pd.read_parquet(f)
-    return df
 
 
 @task
@@ -58,6 +38,7 @@ def features(df):
     return df
 
 
+# TODO: I think this is now deprecated, as model versions are tracked by MLFlow now, right?
 @task
 def persist_model(model, filename):
     s3 = get_s3_client()
@@ -69,21 +50,16 @@ def persist_model(model, filename):
 # TODO: parameterize hyperparam tuning option. Use pydantic?
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
-def train_model(df: pd.DataFrame | None, log_prints=True):
+def train_model(dvc_dataset_info: dict | None, log_prints=True):
     """Train an XGBoost timeseries forecasting model
 
     Args:
-        df: A raw hourly demand dataset. If this is None, we will fetch the
-            relevant dataset from the DVC data warehouse.
+        dvc_dataset_info:
     """
-    if df is None:
-        # Fetch dataset
-
-        # TODO: Parameterize dataset timeframe (un-hardcode), or grab the
-        # most recent dataset from DVC?
-        start_ts = pd.Timestamp('2015-07-01 05:00:00+00:00')
-        end_ts = pd.Timestamp('2024-06-28 04:00:00+00:00')
-        df = get_data(start_ts, end_ts)
+    if dvc_dataset_info is None:
+        assert False  # TODO implement.
+    else:
+        df = get_dvc_datset_as_df(dvc_dataset_info)
 
     # Feature Engineering
     df = clean_data(df)

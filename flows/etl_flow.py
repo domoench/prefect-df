@@ -4,6 +4,7 @@ from utils.storage import (
     obj_key_with_timestamps,
     ensure_empty_dir,
     get_dvc_remote_repo_url,
+    get_dvc_data_url,
 )
 from utils.pandas import print_df_summary
 from consts import EIA_EARLIEST_HOUR_UTC
@@ -171,25 +172,29 @@ def load_to_dvc(df: pd.DataFrame):
     start_ts = df.index.min()
     end_ts = df.index.max()
     filename = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
-    dataset_path = f'{local_dvc_repo}/data/{filename}'
-    df.to_parquet(dataset_path)
+    dvc_dataset_path = f'data/{filename}'
+    local_dataset_path = f'{local_dvc_repo}/{dvc_dataset_path}'
+    df.to_parquet(local_dataset_path)
 
     # Add dataset to dvc tracking
-    dvc_repo.add(dataset_path)
+    dvc_repo.add(local_dataset_path)
 
     # Git Tracking
-    git_repo.git.add(f'{dataset_path}.dvc')
+    git_repo.git.add(f'{local_dataset_path}.dvc')
     git_repo.git.add(f'{local_dvc_repo}/data/.gitignore')
 
-    diffs = git_repo.index.diff(None)
+    diffs = git_repo.index.diff('HEAD')
     diff_files = list(map(lambda d: d.a_path, diffs))
+    git_commit_hash = None
     if len(diff_files) > 0:
-        print(f'Staged files: {diff_files}')
+        print(f'Staged files:\n{diff_files}')
 
-        print('Git commiting')
-        commit_msg = f"Add dataset. End ts: {end_ts.strftime('%Y-%m-%d_%H')}"  # TODO better message
+        commit_msg = 'Add dataset.'
         commit = git_repo.index.commit(commit_msg)
-        print(f'Git commit info:\n{commit}')
+        tag_str = f"s{start_ts.strftime('%Y-%m-%d_%H')}.e{end_ts.strftime('%Y-%m-%d_%H')}"
+        git_repo.create_tag(ref=commit, path=tag_str)
+        git_commit_hash = str(commit)
+        print(f'Git commit hash: {git_commit_hash}')
         git_repo.remote(name='origin').push()
         # TODO git tags?
 
@@ -197,16 +202,28 @@ def load_to_dvc(df: pd.DataFrame):
         # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
         dvc_repo.push()
     else:
-        print('No dataset changes.')
+        git_commit_hash = str(git_repo.head.commit)
+        print(f'No dataset changes. Using HEAD as commit hash: {git_commit_hash}')
+
+    dvc_data_info = {
+        'repo': git_repo_url,
+        'path': dvc_dataset_path,
+        'rev': git_commit_hash,
+    }
+    return dvc_data_info
 
 
 @flow(log_prints=True)
 def etl(start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
         end_ts: datetime = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(weeks=1)).to_pydatetime()):
     """Pulls all available hourly EIA demand data between the given start and end
-    timestamps and persists it in the S3 data warehouse as a parquet file.
+    timestamps and persists it in the DVC data warehouse as a parquet file.
+
+    Returns:
+        dict: A dict containing the info relevant to retrieve a dvc-tracked dataset
     """
     df = extract(start_ts, end_ts)
     df = transform(df)
-    load_to_dvc(df)
-    return df
+    dvc_data_info = load_to_dvc(df)
+
+    return dvc_data_info
