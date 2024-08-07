@@ -7,9 +7,6 @@ import xgboost as xgb
 import pandas as pd
 
 from core.data import TIME_FEATURES, TARGET
-from core.logging import get_logger
-
-lg = get_logger()
 
 DEFAULT_XGB_PARAMS = {
     'learning_rate': [0.02],
@@ -43,13 +40,13 @@ def train_xgboost(df, hyperparam_tuning=False):
     FEATURES = TIME_FEATURES
 
     hpt_str = 'hyperparameter tuning and' if hyperparam_tuning else ''
-    lg.info(f'Performing {hpt_str} cross validation')
+    print(f'Performing {hpt_str} cross validation')
     reg.fit(df[FEATURES], df[TARGET])
 
     cv_results_df = pd.DataFrame(reg.cv_results_).sort_values(by='rank_test_score')
-    lg.info(f'Cross validation results:\n{cv_results_df}')
-    lg.info(f'Best parameters:\n{reg.best_params_}')
+    print(f'Cross validation results:\n{cv_results_df}')
+    print(f'Best parameters:\n{reg.best_params_}')
 
     best_est = reg.best_estimator_
-    lg.info(f'Feature importances: {best_est.feature_importances_}')
+    print(f'Feature importances: {best_est.feature_importances_}')
     return best_est

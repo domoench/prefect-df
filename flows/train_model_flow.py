@@ -1,7 +1,6 @@
 from prefect import flow, task, runtime
 from utils.storage import (
     get_s3_client,
-    obj_key_with_timestamps,
     model_to_pickle_buff,
     get_dvc_remote_repo_url,
 )
@@ -11,13 +10,10 @@ from core.data import (
     impute_null_demand_values,
 )
 from core.model import train_xgboost
-from core.logging import get_logger
 import pandas as pd
 import os
 import mlflow
 import dvc.api
-
-lg = get_logger()
 
 
 @task
@@ -58,7 +54,7 @@ def features(df):
     # Haven't decided yet if that will be interesting, or just training my model
     # to copy EIA's model.
     df = df.drop(columns=['DF'])
-    lg.info(df)
+    print(df)
     return df
 
 
@@ -67,22 +63,30 @@ def persist_model(model, filename):
     s3 = get_s3_client()
     model_buff = model_to_pickle_buff(model)
     s3.upload_fileobj(model_buff, 'models', filename)
-    lg.info(model)
+    print(model)
 
 
 # TODO: parameterize hyperparam tuning option. Use pydantic?
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
-def train_model(log_prints=True):
-    # TODO: Determine training end date (un-hardcode)
-    start_ts = pd.Timestamp('2015-07-01 05:00:00+00:00')
-    end_ts = pd.Timestamp('2024-06-28 04:00:00+00:00')
+def train_model(df: pd.DataFrame | None, log_prints=True):
+    """Train an XGBoost timeseries forecasting model
 
-    # Get data
-    df = get_data(start_ts, end_ts)
-    df = clean_data(df)
+    Args:
+        df: A raw hourly demand dataset. If this is None, we will fetch the
+            relevant dataset from the DVC data warehouse.
+    """
+    if df is None:
+        # Fetch dataset
+
+        # TODO: Parameterize dataset timeframe (un-hardcode), or grab the
+        # most recent dataset from DVC?
+        start_ts = pd.Timestamp('2015-07-01 05:00:00+00:00')
+        end_ts = pd.Timestamp('2024-06-28 04:00:00+00:00')
+        df = get_data(start_ts, end_ts)
 
     # Feature Engineering
+    df = clean_data(df)
     df = features(df)
 
     # MLFlow Tracking

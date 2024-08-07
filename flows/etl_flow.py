@@ -1,13 +1,11 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
-from prefect.blocks.system import Secret
 from utils.storage import (
     obj_key_with_timestamps,
     ensure_empty_dir,
     get_dvc_remote_repo_url,
 )
 from utils.pandas import print_df_summary
-from core.logging import get_logger
 from consts import EIA_EARLIEST_HOUR_UTC
 import requests
 import pandas as pd
@@ -16,16 +14,11 @@ from datetime import datetime
 from dvc.repo import Repo as DvcRepo
 from git import Repo as GitRepo
 
-# TODO: Now that I've learned I can't log to prefect UI from my core module
-# is there any more benefit to this logging abstraction? Inside flow/task code
-# should I use print statements or the prefect logger?
-lg = get_logger()
-
 EIA_MAX_REQUEST_ROWS = 5000
 
 
 def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
-    lg.info(f'Fetching API page. offset:{offset}. length:{length}')
+    print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
            'sort[0][column]=period&sort[0][direction]=asc')
@@ -65,15 +58,15 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
     # Query EIA to determine exactly how many records match our time range
     r = request_EIA_data(start_ts, end_ts, 0)
     num_total_records = int(r.json()['response']['total'])
-    lg.info(f'Total records to fetch: {num_total_records}')
+    print(f'Total records to fetch: {num_total_records}')
 
     # Calculate how many paginated API requests will be required to fetch all
     # the timeseries data
     num_full_requests = num_total_records // EIA_MAX_REQUEST_ROWS
     final_request_length = num_total_records % EIA_MAX_REQUEST_ROWS
-    lg.info((f'Fetching {hours} hours of data: {num_total_records} records.\n',
+    print((f'Fetching {hours} hours of data: {num_total_records} records.\n',
           f'Start: {start_ts}. End: {end_ts}'))
-    lg.info((f'Will make {num_full_requests} {EIA_MAX_REQUEST_ROWS}-length requests '
+    print((f'Will make {num_full_requests} {EIA_MAX_REQUEST_ROWS}-length requests '
            f'and one {final_request_length}-length request.'))
 
     # Make the requests concurrently
@@ -97,7 +90,7 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
 
 @task
 def extract(start_ts: datetime, end_ts: datetime):
-    lg.info("Fetching EIA electricty demand timeseries.")
+    print("Fetching EIA electricty demand timeseries.")
 
     # Calculate the number of rows to fetch from the API between start and end
     eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
@@ -109,7 +102,7 @@ def extract(start_ts: datetime, end_ts: datetime):
 
 @task
 def transform(eia_df: pd.DataFrame):
-    lg.info('Transforming timeseries.')
+    print('Transforming timeseries.')
 
     # Convert types
     eia_df['UTC period'] = pd.to_datetime(eia_df['period'], utc=True)
@@ -160,8 +153,8 @@ def transform(eia_df: pd.DataFrame):
 
 
 @task
-def load(df: pd.DataFrame):
-    lg.info('Loading timeseries into warehouse.')
+def load_to_dvc(df: pd.DataFrame):
+    print('Loading timeseries into warehouse.')
 
     # Ensure clean local git/dvc repo directory
     local_dvc_repo = os.getenv('DVC_LOCAL_REPO_PATH')
@@ -191,22 +184,22 @@ def load(df: pd.DataFrame):
     diffs = git_repo.index.diff(None)
     diff_files = list(map(lambda d: d.a_path, diffs))
     if len(diff_files) > 0:
-        lg.info(f'Staged files: {diff_files}')
+        print(f'Staged files: {diff_files}')
 
-        lg.info('Git commiting')
+        print('Git commiting')
         commit_msg = f"Add dataset. End ts: {end_ts.strftime('%Y-%m-%d_%H')}"  # TODO better message
-        git_repo.index.commit(commit_msg)
+        commit = git_repo.index.commit(commit_msg)
+        print(f'Git commit info:\n{commit}')
         git_repo.remote(name='origin').push()
         # TODO git tags?
 
-        lg.info('Pushing dataset to DVC remote storage')
-        # Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+        print('Pushing dataset to DVC remote storage')
+        # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
         dvc_repo.push()
     else:
-        lg.info('No dataset changes.')
+        print('No dataset changes.')
 
 
-# @validate_arguments
 @flow(log_prints=True)
 def etl(start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
         end_ts: datetime = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(weeks=1)).to_pydatetime()):
@@ -215,4 +208,5 @@ def etl(start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime
     """
     df = extract(start_ts, end_ts)
     df = transform(df)
-    load(df)
+    load_to_dvc(df)
+    return df

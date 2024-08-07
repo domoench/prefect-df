@@ -4,14 +4,11 @@ Module containing logic for getting and persisting data, and feature engineering
 
 from scipy.stats import skew
 from collections import defaultdict
-from core.logging import get_logger
 import numpy as np
 import pandas as pd
 
 TIME_FEATURES = ['hour', 'month', 'year', 'quarter', 'dayofweek', 'dayofmonth', 'dayofyear']
 TARGET = 'D'
-
-lg = get_logger()
 
 
 def add_temporal_features(df):
@@ -32,10 +29,10 @@ def cap_column_outliers(df, column, low, high):
     """Cap the values of the given dataframe's column between the given low
     and high threshold values."""
     df = df.copy()
-    lg.info(f'Input data skew: {skew(df.D.dropna())}')
+    print(f'Input data skew: {skew(df.D.dropna())}')
     df.loc[df.D < low, 'D'] = low
     df.loc[df.D > high, 'D'] = high
-    lg.info(f'Output data skew: {skew(df.D.dropna())}')
+    print(f'Output data skew: {skew(df.D.dropna())}')
     return df
 
 
@@ -43,7 +40,7 @@ def impute_null_demand_values(df):
     """Given an hour-resolution EIA dataframe with a 'D' column, impute null values
     as the average value for the given month and hour."""
     df = df.copy()
-    lg.info(f'Null demand values: {sum(df.D.isnull())}')
+    print(f'Null demand values: {sum(df.D.isnull())}')
 
     # Create a map from month,hour to average demand value
     avg_D_by_month_hour = defaultdict(dict)

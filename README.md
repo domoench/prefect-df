@@ -1,6 +1,6 @@
-An automated ML pipeline to forecast electricity demand for the PJM balancing authority.
+An automated ML pipeline to forecast hourly electricity demand for the PJM balancing authority.
 
-<img 
+<img
     src="https://github.com/user-attachments/assets/efd0d3b8-3d4c-4d50-a93b-0009093ca0e9"
     alt="Predicted vs. true electricity demand timeseries"
     width="400">
@@ -30,11 +30,11 @@ demand data.
 
 # Stack
 
-- [X] Docker Compose Dev Environment
-- [X] Prefect (ML Workflow Orchestration)
-- [ ] MLFlow
-- [X] DVC
-- [X] XGBoost
+- Dev Env: Docker Compose
+- ML Workflow Orchestration: Prefect
+- Experiment tracking: MLFlow
+- Dataset version tracking and 'Data Warehouse': DVC (+ git repo)
+- Model: XGBoost
 
 # References
 
