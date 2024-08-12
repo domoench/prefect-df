@@ -194,11 +194,13 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
         commit_msg = 'Add dataset.'
         commit = git_repo.index.commit(commit_msg)
         tag_str = f"s{start_ts.strftime('%Y-%m-%d_%H')}.e{end_ts.strftime('%Y-%m-%d_%H')}"
-        git_repo.create_tag(ref=commit, path=tag_str)
+        git_repo.create_tag(tag_str, ref=commit)
         git_commit_hash = str(commit)
-        print(f'Git commit hash: {git_commit_hash}')
-        git_repo.remote(name='origin').push()
-        # TODO git tags?
+        print(f'Git commit hash: {git_commit_hash}. Git tag: {tag_str}')
+        origin = git_repo.remote(name='origin')
+        # Push commit and tag
+        origin.push()
+        origin.push(tag_str)
 
         print('Pushing dataset to DVC remote storage')
         # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
@@ -215,16 +217,14 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
 
 
 @flow(log_prints=True)
-def etl(start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
-        end_ts: datetime = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(weeks=1)).to_pydatetime()):
+def etl(
+    start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
+    end_ts: datetime = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(weeks=1)).to_pydatetime()
+) -> DVCDatasetInfo:
     """Pulls all available hourly EIA demand data between the given start and end
     timestamps and persists it in the DVC data warehouse as a parquet file.
-
-    Returns:
-        dict: A dict containing the info relevant to retrieve a dvc-tracked dataset
     """
     df = extract(start_ts, end_ts)
     df = transform(df)
     dvc_data_info = load_to_dvc(df)
-
     return dvc_data_info

@@ -77,3 +77,5 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     reg = train_xgboost(df, hyperparam_tuning=False)
 
     persist_model(reg, 'model.pkl')
+
+    # TODO: Save plots as mlflow artifacts?
