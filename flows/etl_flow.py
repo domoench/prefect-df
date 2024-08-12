@@ -9,6 +9,7 @@ from utils.pandas import print_df_summary
 from core.types import (
     DVCDatasetInfo,
 )
+from core.utils import compact_ts_str
 from consts import EIA_EARLIEST_HOUR_UTC
 import requests
 import pandas as pd
@@ -193,7 +194,7 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
 
         commit_msg = 'Add dataset.'
         commit = git_repo.index.commit(commit_msg)
-        tag_str = f"s{start_ts.strftime('%Y-%m-%d_%H')}.e{end_ts.strftime('%Y-%m-%d_%H')}"
+        tag_str = f"s{compact_ts_str(start_ts)}.e{compact_ts_str(end_ts)}"
         git_repo.create_tag(tag_str, ref=commit)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}. Git tag: {tag_str}')

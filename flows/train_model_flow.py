@@ -11,6 +11,7 @@ from core.data import (
 )
 from core.types import DVCDatasetInfo
 from core.model import train_xgboost
+from core.utils import compact_ts_str
 import os
 import mlflow
 
@@ -70,6 +71,12 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
     mlflow.set_experiment('XGBoost Demand Forecast')
     mlflow.set_tag('prefect_flow_run', runtime.flow_run.name)
+    tags = {
+        'prefect_flow_run': runtime.flow_run.name,
+        'training_window.start': compact_ts_str(df.index.min()),
+        'training_window.end': compact_ts_str(df.index.max()),
+    }
+    mlflow.set_tags(tags)
     mlflow.xgboost.autolog()
 
     # Cross validation training

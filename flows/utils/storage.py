@@ -7,6 +7,7 @@ import dvc.api
 import pandas as pd
 from prefect.blocks.system import Secret
 from core.types import DVCDatasetInfo
+from core.utils import compact_ts_str
 
 
 def get_s3_client():
@@ -30,8 +31,8 @@ def get_s3_client():
 
 def obj_key_with_timestamps(prefix, start_ts, end_ts):
     """Generate a parquet file name that encodes a time range"""
-    start_str = start_ts.strftime('%Y-%m-%d_%H')
-    end_str = end_ts.strftime('%Y-%m-%d_%H')
+    start_str = compact_ts_str(start_ts)
+    end_str = compact_ts_str(end_ts)
     return f'{prefix}_{start_str}_{end_str}.parquet'
 
 
