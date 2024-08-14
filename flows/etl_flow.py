@@ -10,7 +10,7 @@ from core.types import (
     DVCDatasetInfo,
 )
 from core.utils import compact_ts_str
-from consts import EIA_EARLIEST_HOUR_UTC
+from core.consts import EIA_EARLIEST_HOUR_UTC
 import requests
 import pandas as pd
 import os

@@ -7,6 +7,7 @@ import xgboost as xgb
 import pandas as pd
 
 from core.data import TIME_FEATURES, TARGET
+from core.consts import EIA_TEST_SET_HOURS
 
 DEFAULT_XGB_PARAMS = {
     'learning_rate': [0.02],
@@ -31,17 +32,23 @@ def train_xgboost(df, hyperparam_tuning=False):
             'objective': ['reg:squarederror'],
         }
 
-    # Perform hyperparameter tuning with time series cross validation
-    TEST_SET_SIZE = 14 * 24  # TODO parameterize
-    NUM_SPLITS = 8  # TODO parameterize
-    tss = TimeSeriesSplit(n_splits=NUM_SPLITS, test_size=TEST_SET_SIZE)
-    reg = GridSearchCV(xgb.XGBRegressor(), params, cv=tss, verbose=2)
-
-    FEATURES = TIME_FEATURES
-
     hpt_str = 'hyperparameter tuning and' if hyperparam_tuning else ''
     print(f'Performing {hpt_str} cross validation')
-    reg.fit(df[FEATURES], df[TARGET])
+
+    # Remove a TEST_SET_SIZE window at the end, so that after cross validation
+    # and refit, the final training set excludes that window for use by adhoc model
+    # evaluation on the most recent TEST_SET_SIZE hours.
+    # TODO add expectation that rows are sorted by time
+    TEST_SET_SIZE = EIA_TEST_SET_HOURS
+    df = df[:-TEST_SET_SIZE]
+
+    # Define timeseries cross validation train/test splits
+    NUM_SPLITS = 8
+    tss = TimeSeriesSplit(n_splits=NUM_SPLITS, test_size=TEST_SET_SIZE)
+
+    # Perform hyperparameter tuning with time series cross validation.
+    reg = GridSearchCV(xgb.XGBRegressor(), params, cv=tss, verbose=2)
+    reg.fit(df[TIME_FEATURES], df[TARGET])
 
     cv_results_df = pd.DataFrame(reg.cv_results_).sort_values(by='rank_test_score')
     print(f'Cross validation results:\n{cv_results_df}')

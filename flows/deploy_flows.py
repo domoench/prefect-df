@@ -1,6 +1,7 @@
 from etl_flow import etl
 from train_model_flow import train_model
 from etl_and_train_flow import etl_and_train
+from compare_models_flow import compare_models
 
 
 if __name__ == "__main__":
@@ -31,5 +32,13 @@ if __name__ == "__main__":
         entrypoint="etl_and_train_flow.py:etl_and_train",
     ).deploy(
         name="etl_and_train",
+        work_pool_name="lf-dev",
+    )
+
+    compare_models.from_source(
+        source="/opt/prefect/flows/",
+        entrypoint="compare_models_flow.py:compare_models",
+    ).deploy(
+        name="compare_models",
         work_pool_name="lf-dev",
     )

@@ -56,7 +56,8 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     """Train an XGBoost timeseries forecasting model
 
     Args:
-        dvc_dataset_info:
+        dvc_dataset_info: Describes which dataset to pull from DVC. This timeseries
+            dataset time span will cover the contiguous training and test set windows.
     """
     if dvc_dataset_info is None:
         assert False  # TODO implement.
@@ -69,12 +70,12 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
 
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
-    mlflow.set_experiment('XGBoost Demand Forecast')
+    mlflow.set_experiment('xgb.df.train')
     mlflow.set_tag('prefect_flow_run', runtime.flow_run.name)
     tags = {
         'prefect_flow_run': runtime.flow_run.name,
-        'training_window.start': compact_ts_str(df.index.min()),
-        'training_window.end': compact_ts_str(df.index.max()),
+        'timestamps.start': compact_ts_str(df.index.min()),
+        'timestamps.end': compact_ts_str(df.index.max()),
     }
     mlflow.set_tags(tags)
     mlflow.xgboost.autolog()
