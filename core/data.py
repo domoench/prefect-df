@@ -85,5 +85,3 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     r = requests.get(url, params=params)
     r.raise_for_status()
     return r
-
-

@@ -5,11 +5,12 @@ from typing import List
 from etl_flow import get_eia_data_as_df, transform
 from train_model_flow import clean_data, features
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
+from core.data import TIME_FEATURES, TARGET
 from core.consts import (
     EIA_TEST_SET_HOURS,
     EIA_BUFFER_HOURS,
 )
-from core.utils import mlflow_model_uri
+from core.utils import mlflow_model_uri, parse_compact_ts_str
 import os
 import pandas as pd
 import mlflow
@@ -33,7 +34,7 @@ def fetch_eval_dataset() -> pd.DataFrame:
     df = transform(df)
     df = clean_data(df)
     df = features(df)
-    df = df.drop(columns=['respondent'])  # TODO is this not dropped in etl and training? Why not a prob there?
+    df = df.drop(columns=['respondent'])  # TODO remove this in ETL?
     print(f'Eval data df:\n{df.head()}')
     return df
 
@@ -41,6 +42,11 @@ def fetch_eval_dataset() -> pd.DataFrame:
 @task
 def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
     # TODO assert the model run's training end date leaves room for evaluation window
+    end_ts_str = model_info.run.data.params['dvc.dataset.train.end']
+    train_end_ts = parse_compact_ts_str(end_ts_str)
+    eval_start_ts = eval_df.index.min()
+    assert train_end_ts < eval_start_ts
+
     mlflow.set_experiment('xgb.df.compare_models')
     run_name = f'{model_info.specifier.name}-v{model_info.specifier.version}_eval'
     model = model_info.model
@@ -49,7 +55,7 @@ def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
         result = mlflow.evaluate(
             model=model,
             data=eval_df,
-            targets='D',
+            targets=TARGET,
             model_type='regressor',
             evaluators=['default'],
         )
@@ -79,7 +85,7 @@ def compare_models(model_specifiers: List[MLFlowModelSpecifier]):
 
         print(f'Fetching mlflow run info for {model.metadata.run_id}')
         run = client.get_run(model.metadata.run_id)
-        model_details.append(MLFlowModelInfo(specifier=ms, model=model, run_info=run.info))
+        model_details.append(MLFlowModelInfo(specifier=ms, model=model, run=run))
 
     eval_df = fetch_eval_dataset()
 
