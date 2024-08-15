@@ -4,8 +4,11 @@ Module containing logic for getting and persisting data, and feature engineering
 
 from scipy.stats import skew
 from collections import defaultdict
+from core.consts import EIA_MAX_REQUEST_ROWS
 import numpy as np
 import pandas as pd
+import os
+import requests
 
 TIME_FEATURES = ['hour', 'month', 'year', 'quarter', 'dayofweek', 'dayofmonth', 'dayofyear']
 TARGET = 'D'
@@ -60,3 +63,27 @@ def impute_null_demand_values(df):
         axis=1,
     )
     return df
+
+
+def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
+    print(f'Fetching API page. offset:{offset}. length:{length}')
+    url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
+           'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
+           'sort[0][column]=period&sort[0][direction]=asc')
+
+    # Use list of tuples instead of dict to allow duplicate params
+    params = [
+      ('offset', offset),
+      ('length', length),
+      ('api_key', os.environ['EIA_API_KEY']),
+      ('start', start_ts.strftime('%Y-%m-%dT%H')),
+      ('end', end_ts.strftime('%Y-%m-%dT%H')),
+      ('facets[type][]', 'D'),
+      ('facets[type][]', 'DF'),
+    ]
+
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    return r
+
+

@@ -5,9 +5,11 @@ Module containing logic for ML model training.
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 import xgboost as xgb
 import pandas as pd
+import mlflow
 
 from core.data import TIME_FEATURES, TARGET
 from core.consts import EIA_TEST_SET_HOURS
+from core.utils import compact_ts_str
 
 DEFAULT_XGB_PARAMS = {
     'learning_rate': [0.02],
@@ -41,6 +43,10 @@ def train_xgboost(df, hyperparam_tuning=False):
     # TODO add expectation that rows are sorted by time
     TEST_SET_SIZE = EIA_TEST_SET_HOURS
     df = df[:-TEST_SET_SIZE]
+    mlflow.log_params({
+        'dvc.dataset.train.start': compact_ts_str(df.index.min()),
+        'dvc.dataset.train.end': compact_ts_str(df.index.max()),
+    })
 
     # Define timeseries cross validation train/test splits
     NUM_SPLITS = 8

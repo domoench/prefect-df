@@ -2,7 +2,8 @@ from prefect import flow, task, runtime
 from utils.storage import (
     get_s3_client,
     model_to_pickle_buff,
-    get_dvc_datset_as_df,
+    get_dvc_dataset_as_df,
+    get_dvc_dataset_url,
 )
 from core.data import (
     add_temporal_features,
@@ -62,7 +63,7 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     if dvc_dataset_info is None:
         assert False  # TODO implement.
     else:
-        df = get_dvc_datset_as_df(dvc_dataset_info)
+        df = get_dvc_dataset_as_df(dvc_dataset_info)
 
     # Feature Engineering
     df = clean_data(df)
@@ -71,18 +72,22 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
     mlflow.set_experiment('xgb.df.train')
-    mlflow.set_tag('prefect_flow_run', runtime.flow_run.name)
-    tags = {
-        'prefect_flow_run': runtime.flow_run.name,
-        'timestamps.start': compact_ts_str(df.index.min()),
-        'timestamps.end': compact_ts_str(df.index.max()),
-    }
-    mlflow.set_tags(tags)
-    mlflow.xgboost.autolog()
+    with mlflow.start_run():
+        mlflow.set_tags({
+            'prefect_flow_run': runtime.flow_run.name,
+        })
 
-    # Cross validation training
-    # TODO: Parameterize Optional Hyper param tuning
-    reg = train_xgboost(df, hyperparam_tuning=False)
+        mlflow.log_params({
+            'dvc.url': get_dvc_dataset_url(dvc_dataset_info),
+            'dvc.commit': dvc_dataset_info.rev,
+            'dvc.dataset.full.start': compact_ts_str(df.index.min()),
+            'dvc.dataset.full.end': compact_ts_str(df.index.max()),
+        })
+
+        # Cross validation training
+        # TODO: Parameterize Optional Hyper param tuning
+        mlflow.xgboost.autolog()
+        reg = train_xgboost(df, hyperparam_tuning=False)
 
     persist_model(reg, 'model.pkl')
 

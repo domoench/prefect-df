@@ -74,7 +74,7 @@ def get_dvc_remote_repo_url():
     return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
 
 
-def get_dvc_datset_as_df(dvc_dataset_info: DVCDatasetInfo):
+def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo):
     data_bytes = dvc.api.read(
         path=dvc_dataset_info.path,
         repo=dvc_dataset_info.repo,
@@ -85,3 +85,7 @@ def get_dvc_datset_as_df(dvc_dataset_info: DVCDatasetInfo):
     df = pd.read_parquet(data_file_like)
 
     return df
+
+
+def get_dvc_dataset_url(ddi: DVCDatasetInfo):
+    return dvc.api.get_url(path=ddi.path, repo=ddi.repo, rev=ddi.rev)
