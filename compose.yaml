@@ -5,7 +5,7 @@ services:
   # PREFECT WORKER
   worker:
     build:
-      context: ./worker
+      context: ./services/worker
     env_file:
       - .env
     volumes:
@@ -15,7 +15,7 @@ services:
   # OBJECT STORAGE
   minio:
     build:
-      context: ./minio
+      context: ./services/minio
     env_file:
       - .env
     volumes:
@@ -27,7 +27,7 @@ services:
   # MLFlow Tracking server
   mlflow:
     build:
-      context: ./mlflow
+      context: ./services/mlflow
     env_file:
       - .env
     ports:
