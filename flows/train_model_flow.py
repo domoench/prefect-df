@@ -2,6 +2,7 @@ from prefect import flow, task, runtime
 from flows.utils.storage import (
     get_s3_client, model_to_pickle_buff,
 )
+from core.consts import EIA_TEST_SET_HOURS
 from core.data import (
     add_temporal_features, cap_column_outliers, impute_null_demand_values,
     get_dvc_dataset_as_df, get_dvc_dataset_url,
@@ -59,8 +60,8 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
     mlflow.log_params({
         'dvc.url': get_dvc_dataset_url(dvc_dataset_info),
         'dvc.commit': dvc_dataset_info.rev,
-        'dvc.dataset.full.start': compact_ts_str(train_df.index.min()),
-        'dvc.dataset.full.end': compact_ts_str(train_df.index.max()),
+        'dvc.dataset.train.start': compact_ts_str(train_df.index.min()),
+        'dvc.dataset.train.end': compact_ts_str(train_df.index.max()),
     })
 
 
@@ -82,6 +83,12 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     # Feature Engineering
     train_df = clean_data(train_df)
     train_df = features(train_df)
+
+    # Remove a TEST_SET_SIZE window at the end, so that after cross validation
+    # and refit, the final training set excludes that window for use by adhoc model
+    # evaluation on the most recent TEST_SET_SIZE hours.
+    # TODO add expectation that rows are sorted by time
+    train_df = train_df[:-EIA_TEST_SET_HOURS]
 
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))

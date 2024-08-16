@@ -37,20 +37,9 @@ def train_xgboost(df, hyperparam_tuning=False):
     hpt_str = 'hyperparameter tuning and' if hyperparam_tuning else ''
     print(f'Performing {hpt_str} cross validation')
 
-    # Remove a TEST_SET_SIZE window at the end, so that after cross validation
-    # and refit, the final training set excludes that window for use by adhoc model
-    # evaluation on the most recent TEST_SET_SIZE hours.
-    # TODO add expectation that rows are sorted by time
-    TEST_SET_SIZE = EIA_TEST_SET_HOURS
-    df = df[:-TEST_SET_SIZE]
-    mlflow.log_params({
-        'dvc.dataset.train.start': compact_ts_str(df.index.min()),
-        'dvc.dataset.train.end': compact_ts_str(df.index.max()),
-    })
-
     # Define timeseries cross validation train/test splits
     NUM_SPLITS = 8
-    tss = TimeSeriesSplit(n_splits=NUM_SPLITS, test_size=TEST_SET_SIZE)
+    tss = TimeSeriesSplit(n_splits=NUM_SPLITS, test_size=EIA_TEST_SET_HOURS)
 
     # Perform hyperparameter tuning with time series cross validation.
     reg = GridSearchCV(xgb.XGBRegressor(), params, cv=tss, verbose=2)
