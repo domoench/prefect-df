@@ -33,6 +33,20 @@ services:
     ports:
       - 5001:5001
 
+  # Jupyter lab container
+  jupyter:
+    build:
+      context: ./services/jupyter
+    env_file:
+      - .env
+    volumes:
+      - ./flows:/app/flows
+      - ./core:/app/core
+      - ./notebooks:/app/notebooks
+      - ./data:/app/data
+    ports:
+      - 8888:8888
+
 volumes:
   minio:
 networks:
