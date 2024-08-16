@@ -5,8 +5,12 @@ Module containing logic for getting and persisting data, and feature engineering
 from scipy.stats import skew
 from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
+from prefect.blocks.system import Secret
+from core.types import DVCDatasetInfo
 import numpy as np
 import pandas as pd
+import dvc.api
+import io
 import os
 import requests
 
@@ -85,3 +89,33 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
     r = requests.get(url, params=params)
     r.raise_for_status()
     return r
+
+
+"""
+DVC
+"""
+
+
+def get_dvc_remote_repo_url(github_PAT: str = None) -> str:
+    if github_PAT is None:
+        github_PAT = Secret.load('github-pat-dvc-dev').get()
+    github_username = os.getenv('DVC_GIT_USERNAME')
+    github_reponame = os.getenv('DVC_GIT_REPONAME')
+    return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
+
+
+def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
+    data_bytes = dvc.api.read(
+        path=dvc_dataset_info.path,
+        repo=dvc_dataset_info.repo,
+        rev=dvc_dataset_info.rev,
+        mode='rb'
+    )
+    data_file_like = io.BytesIO(data_bytes)
+    df = pd.read_parquet(data_file_like)
+
+    return df
+
+
+def get_dvc_dataset_url(ddi: DVCDatasetInfo):
+    return dvc.api.get_url(path=ddi.path, repo=ddi.repo, rev=ddi.rev)

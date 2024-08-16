@@ -1,22 +1,20 @@
 from prefect import flow, task
 from prefect.tasks import task_input_hash
-from utils.storage import (
-    obj_key_with_timestamps,
-    ensure_empty_dir,
-    get_dvc_remote_repo_url,
+from flows.utils.storage import (
+    obj_key_with_timestamps, ensure_empty_dir
 )
-from utils.pandas import print_df_summary
-from core.types import (
-    DVCDatasetInfo,
+from flows.utils.pandas import print_df_summary
+from core.consts import (
+    EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
 )
-from core.utils import compact_ts_str
-from core.consts import EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
-from core.data import request_EIA_data
-import pandas as pd
-import os
+from core.data import request_EIA_data, get_dvc_remote_repo_url
+from core.types import DVCDatasetInfo
+from core.utils import compact_ts_str, utcnow_minus_buffer_ts
 from datetime import datetime
 from dvc.repo import Repo as DvcRepo
 from git import Repo as GitRepo
+import os
+import pandas as pd
 
 
 @task
@@ -26,11 +24,7 @@ def get_eia_data_as_df(start_ts, end_ts, offset=0, length=EIA_MAX_REQUEST_ROWS):
     return df
 
 
-# TODO Locally, the cache value disappears while the key remains. Leading to
-# the errors like:
-# ValueError: Path /root/.prefect/storage/fde6265e3819476eb8fbcb4f234dc9fc
-# does not exist.
-@task(cache_key_fn=task_input_hash)
+@task(cache_key_fn=task_input_hash, refresh_cache=(os.getenv('DF_ENVIRONMENT') == 'dev'))
 def concurrent_fetch_EIA_data(start_ts, end_ts):
     time_span = end_ts - start_ts
     hours = int(time_span.total_seconds() / 3600)
@@ -196,7 +190,7 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
 @flow(log_prints=True)
 def etl(
     start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
-    end_ts: datetime = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(weeks=1)).to_pydatetime()
+    end_ts: datetime = utcnow_minus_buffer_ts(),
 ) -> DVCDatasetInfo:
     """Pulls all available hourly EIA demand data between the given start and end
     timestamps and persists it in the DVC data warehouse as a parquet file.

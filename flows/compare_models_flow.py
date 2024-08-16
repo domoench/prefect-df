@@ -2,10 +2,10 @@ from prefect import flow, task, runtime
 from mlflow import MlflowClient
 from pprint import pprint
 from typing import List
-from etl_flow import get_eia_data_as_df, transform
-from train_model_flow import clean_data, features
+from flows.etl_flow import get_eia_data_as_df, transform
+from flows.train_model_flow import clean_data, features
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
-from core.data import TIME_FEATURES, TARGET
+from core.data import TARGET
 from core.consts import (
     EIA_TEST_SET_HOURS,
     EIA_BUFFER_HOURS,
@@ -35,17 +35,18 @@ def fetch_eval_dataset() -> pd.DataFrame:
     df = clean_data(df)
     df = features(df)
     df = df.drop(columns=['respondent'])  # TODO remove this in ETL?
-    print(f'Eval data df:\n{df.head()}')
+    print(f'Eval data df:\n{df}')
     return df
 
 
 @task
 def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
-    # TODO assert the model run's training end date leaves room for evaluation window
     end_ts_str = model_info.run.data.params['dvc.dataset.train.end']
     train_end_ts = parse_compact_ts_str(end_ts_str)
     eval_start_ts = eval_df.index.min()
-    assert train_end_ts < eval_start_ts
+    print(f'train_end_ts:{train_end_ts}. eval_start:{eval_start_ts}')
+    assert train_end_ts <= eval_start_ts
+    # TODO: Replace assertion with more comprehensive great expectations validation?
 
     mlflow.set_experiment('xgb.df.compare_models')
     run_name = f'{model_info.specifier.name}-v{model_info.specifier.version}_eval'
@@ -89,10 +90,10 @@ def compare_models(model_specifiers: List[MLFlowModelSpecifier]):
 
     eval_df = fetch_eval_dataset()
 
+    # TODO paralellize these?
     for md in model_details:
         # Evaluate the model
         evaluate_model(md, eval_df)
 
-    # Fetch performance metrics
     # Generate performance-over-time plot
     # Log plot as artifact to MLFlow

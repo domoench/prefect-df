@@ -1,7 +1,7 @@
-from etl_flow import etl
-from train_model_flow import train_model
-from etl_and_train_flow import etl_and_train
-from compare_models_flow import compare_models
+from flows.etl_flow import etl
+from flows.train_model_flow import train_model
+from flows.etl_and_train_flow import etl_and_train
+from flows.compare_models_flow import compare_models
 
 
 if __name__ == "__main__":

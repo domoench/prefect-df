@@ -30,4 +30,4 @@ WORKDIR /app
 RUN chown -R jupyteruser:jupyteruser /app
 USER jupyteruser
 
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--notebook-dir=/app"]

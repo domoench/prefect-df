@@ -1,14 +1,10 @@
 from prefect import flow, task, runtime
-from utils.storage import (
-    get_s3_client,
-    model_to_pickle_buff,
-    get_dvc_dataset_as_df,
-    get_dvc_dataset_url,
+from flows.utils.storage import (
+    get_s3_client, model_to_pickle_buff,
 )
 from core.data import (
-    add_temporal_features,
-    cap_column_outliers,
-    impute_null_demand_values,
+    add_temporal_features, cap_column_outliers, impute_null_demand_values,
+    get_dvc_dataset_as_df, get_dvc_dataset_url,
 )
 from core.types import DVCDatasetInfo
 from core.model import train_xgboost
