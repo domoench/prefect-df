@@ -9,8 +9,9 @@ from core.data import (
 from core.types import DVCDatasetInfo
 from core.model import train_xgboost
 from core.utils import compact_ts_str
-import os
 import mlflow
+import os
+import pandas as pd
 
 
 @task
@@ -46,6 +47,23 @@ def persist_model(model, filename):
     print(model)
 
 
+def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDatasetInfo):
+    """Emit relevant model training tags and params for this mlflow run.
+
+    This function assumes it will be called in an mlflow run context.
+    """
+    mlflow.set_tags({
+        'prefect_flow_run': runtime.flow_run.name,
+    })
+
+    mlflow.log_params({
+        'dvc.url': get_dvc_dataset_url(dvc_dataset_info),
+        'dvc.commit': dvc_dataset_info.rev,
+        'dvc.dataset.full.start': compact_ts_str(train_df.index.min()),
+        'dvc.dataset.full.end': compact_ts_str(train_df.index.max()),
+    })
+
+
 # TODO: parameterize hyperparam tuning option. Use pydantic?
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
@@ -59,31 +77,22 @@ def train_model(dvc_dataset_info: DVCDatasetInfo | None, log_prints=True):
     if dvc_dataset_info is None:
         assert False  # TODO implement.
     else:
-        df = get_dvc_dataset_as_df(dvc_dataset_info)
+        train_df = get_dvc_dataset_as_df(dvc_dataset_info)
 
     # Feature Engineering
-    df = clean_data(df)
-    df = features(df)
+    train_df = clean_data(train_df)
+    train_df = features(train_df)
 
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
     mlflow.set_experiment('xgb.df.train')
     with mlflow.start_run():
-        mlflow.set_tags({
-            'prefect_flow_run': runtime.flow_run.name,
-        })
-
-        mlflow.log_params({
-            'dvc.url': get_dvc_dataset_url(dvc_dataset_info),
-            'dvc.commit': dvc_dataset_info.rev,
-            'dvc.dataset.full.start': compact_ts_str(df.index.min()),
-            'dvc.dataset.full.end': compact_ts_str(df.index.max()),
-        })
+        mlflow_emit_tags_and_params(train_df, dvc_dataset_info)
 
         # Cross validation training
         # TODO: Parameterize Optional Hyper param tuning
         mlflow.xgboost.autolog()
-        reg = train_xgboost(df, hyperparam_tuning=False)
+        reg = train_xgboost(train_df, hyperparam_tuning=False)
 
     persist_model(reg, 'model.pkl')
 
