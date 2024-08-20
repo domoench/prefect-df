@@ -40,9 +40,6 @@ def clean_data(df):
 def features(df):
     # Add temporal features
     df = add_temporal_features(df)
-
-    # TODO: Drop the demand forecast column for now. Should remove in ETL.
-    df = df.drop(columns=['DF'])
     print(df)
     return df
 

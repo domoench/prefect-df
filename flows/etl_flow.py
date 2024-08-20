@@ -64,7 +64,7 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
 
 @task
 def extract(start_ts: datetime, end_ts: datetime):
-    print("Fetching EIA electricty demand timeseries.")
+    print('Fetching EIA electricty demand timeseries.')
 
     # Calculate the number of rows to fetch from the API between start and end
     eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
@@ -87,11 +87,9 @@ def transform(eia_df: pd.DataFrame):
     # Remove duplicates
     eia_df = eia_df.drop_duplicates(subset=['UTC period', 'value', 'type'])
 
-    # In the EIA API response, for any given hour, there are between 0 and 2 records:
-    # 1 record for D value, and another for the DF value. Update dataframe to have 1 row
-    # for each hour, with 2 columns: D and DF. Units are MWh.
+    # In the EIA API response, for any given hour, there are between 0 and 1 records:
+    # 1 record for D value, or 0 if EIA has no D record. Units are MWh.
     demand_df = eia_df[eia_df.type == 'D']
-    d_forecast_df = eia_df[eia_df.type == 'DF']
 
     # Create base dataframe with a timestamp for every hour in the range
     start_ts = eia_df['UTC period'].min()
@@ -101,21 +99,12 @@ def transform(eia_df: pd.DataFrame):
     # Merge in the demand timeseries
     merge_df = pd.merge(
         dt_df,
-        demand_df[["UTC period", "respondent", "value"]].rename(columns={"value": "D"}),
-        left_on="utc_ts",
-        right_on="UTC period",
-        how="left",
+        demand_df[['UTC period', 'respondent', 'value']].rename(columns={'value': 'D'}),
+        left_on='utc_ts',
+        right_on='UTC period',
+        how='left',
     )
-
-    # Merge in the demand forecast timeseries
-    merge_df = pd.merge(
-        merge_df,
-        d_forecast_df[['UTC period', 'value']].rename(columns={'value': 'DF'}),
-        left_on='utc_ts', right_on='UTC period',
-        how='left'
-    )
-
-    merge_df = merge_df.drop(columns=['UTC period_x', 'UTC period_y'])
+    merge_df = merge_df.drop(columns=['UTC period'])
 
     # Set timestamp as index
     merge_df = merge_df.set_index('utc_ts', drop=False)
@@ -161,7 +150,7 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
 
         commit_msg = 'Add dataset.'
         commit = git_repo.index.commit(commit_msg)
-        tag_str = f"s{compact_ts_str(start_ts)}.e{compact_ts_str(end_ts)}"
+        tag_str = f's{compact_ts_str(start_ts)}.e{compact_ts_str(end_ts)}'
         git_repo.create_tag(tag_str, ref=commit)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}. Git tag: {tag_str}')

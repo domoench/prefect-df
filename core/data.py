@@ -81,7 +81,6 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
       ('start', start_ts.strftime('%Y-%m-%dT%H')),
       ('end', end_ts.strftime('%Y-%m-%dT%H')),
       ('facets[type][]', 'D'),
-      ('facets[type][]', 'DF'),
     ]
 
     r = requests.get(url, params=params)

@@ -19,8 +19,6 @@ import mlflow
 """TODO
     [ ] Parallel fetch and eval of models?
     [ ] Determine which performance metric to use
-    [ ] Great expectations test that dataset timespan used to train
-        model correctly leaves room for evaluation window.
 """
 
 
