@@ -4,7 +4,7 @@ from core.consts import EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
 from core.data import request_EIA_data, get_dvc_remote_repo_url
 from core.types import DVCDatasetInfo
 from core.utils import (
-    obj_key_with_timestamps, ensure_empty_dir, print_df_summary,
+    obj_key_with_timestamps, ensure_empty_dir, df_summary,
     compact_ts_str, utcnow_minus_buffer_ts
 )
 from datetime import datetime
@@ -65,8 +65,7 @@ def extract(start_ts: datetime, end_ts: datetime):
 
     # Calculate the number of rows to fetch from the API between start and end
     eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
-
-    print_df_summary(eia_df)
+    print(df_summary(eia_df))
 
     return eia_df
 
@@ -105,7 +104,7 @@ def transform(eia_df: pd.DataFrame):
 
     # Set timestamp as index
     merge_df = merge_df.set_index('utc_ts', drop=False)
-    print_df_summary(merge_df)
+    print(df_summary(merge_df))
     return merge_df
 
 
@@ -144,17 +143,15 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
     git_commit_hash = None
     if len(diff_files) > 0:
         print(f'Staged files:\n{diff_files}')
-
-        commit_msg = 'Add dataset.'
+        commit_msg = f'Add dataset.\n' \
+            f'start:{compact_ts_str(start_ts)}\nend:{compact_ts_str(start_ts)}\n\n' \
+            f'{df_summary(df)}'
         commit = git_repo.index.commit(commit_msg)
-        tag_str = f's{compact_ts_str(start_ts)}.e{compact_ts_str(end_ts)}'
-        git_repo.create_tag(tag_str, ref=commit)
         git_commit_hash = str(commit)
-        print(f'Git commit hash: {git_commit_hash}. Git tag: {tag_str}')
+        print(f'Git commit hash: {git_commit_hash}')
         origin = git_repo.remote(name='origin')
-        # Push commit and tag
+        # Push commit
         origin.push()
-        origin.push(tag_str)
 
         print('Pushing dataset to DVC remote storage')
         # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
