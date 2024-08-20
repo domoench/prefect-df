@@ -118,10 +118,7 @@ def transform(eia_df: pd.DataFrame):
     merge_df = merge_df.drop(columns=['UTC period_x', 'UTC period_y'])
 
     # Set timestamp as index
-    merge_df = merge_df.set_index('utc_ts')
-
-    # TODO: Imputation? Or save that for later down the pipe?
-
+    merge_df = merge_df.set_index('utc_ts', drop=False)
     print_df_summary(merge_df)
     return merge_df
 

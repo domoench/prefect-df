@@ -7,15 +7,13 @@ from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
 from prefect.blocks.system import Secret
 from core.types import DVCDatasetInfo
+from core.gx.gx import run_gx_checkpoint
 import numpy as np
 import pandas as pd
 import dvc.api
 import io
 import os
 import requests
-
-TIME_FEATURES = ['hour', 'month', 'year', 'quarter', 'dayofweek', 'dayofmonth', 'dayofyear']
-TARGET = 'D'
 
 
 def add_temporal_features(df):
@@ -113,6 +111,9 @@ def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
     )
     data_file_like = io.BytesIO(data_bytes)
     df = pd.read_parquet(data_file_like)
+
+    # Validate data pulled from DVC data warehouse
+    run_gx_checkpoint('etl', df)
 
     return df
 

@@ -5,9 +5,7 @@ Module containing logic for ML model training.
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
 import xgboost as xgb
 import pandas as pd
-
-from core.data import TIME_FEATURES, TARGET
-from core.consts import EIA_TEST_SET_HOURS
+from core.consts import EIA_TEST_SET_HOURS, TIME_FEATURES, TARGET
 
 DEFAULT_XGB_PARAMS = {
     'learning_rate': [0.02],

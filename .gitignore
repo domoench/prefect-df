@@ -3,4 +3,5 @@
 data/*
 .virtual_documents/
 flows/mlruns/
+notebooks/mlruns/
 __pycache__

@@ -73,7 +73,7 @@ def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
 
 
 @task
-def generate_performance_plot(model_specifiers: List[MLFlowModelSpecifier]):
+def generate_performance_plot(model_names: List[str]):
     # Fetch experiment runs from mlflow
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
     experiment_name = 'xgb.df.compare_models'
@@ -93,25 +93,23 @@ def generate_performance_plot(model_specifiers: List[MLFlowModelSpecifier]):
     for m in metrics:
         runs[f'metrics.{m}'] = pd.to_numeric(runs[f'metrics.{m}'])
 
-    def filter_runs(runs_df, model_name, model_version):
-        mn_mask = runs_df['params.model_name'] == model_name
-        mv_mask = runs_df['params.model_version'] == model_version
-        return runs_df[mn_mask & mv_mask]
-
     # Generate the plot
     num_cols = 3
     num_rows = (len(metrics) // num_cols) + 1
 
     fig, axs = plt.subplots(num_rows, num_cols, figsize=(15, 8))
     axs = axs.flat
-    for m in model_specifiers:
-        model_runs_df = filter_runs(runs, m.name, m.version)
+    for model_name in model_names:
+        model_runs_df = runs[runs['params.model_name'] == model_name]
+        model_versions = model_runs_df['params.model_version'].unique()
         for i, metric in enumerate(metrics):
-            axs[i].set_title(metric)
-            axs[i].plot(model_runs_df.start_time, model_runs_df[f'metrics.{metric}'],
-                        marker='o', label=f'{m.name}-{m.version}')
-            axs[i].legend()
-            axs[i].tick_params(axis='x', rotation=45)
+            for v in model_versions:
+                df = model_runs_df[model_runs_df['params.model_version'] == v]
+                axs[i].set_title(metric)
+                axs[i].plot(df.start_time, df[f'metrics.{metric}'],
+                            marker='o', label=f'{model_name}-v{v}')
+                axs[i].legend()
+                axs[i].tick_params(axis='x', rotation=45)
 
     # Remove axes for any extra subplots beyond the number of metrics
     for i in range(len(metrics), len(axs)):
@@ -122,12 +120,12 @@ def generate_performance_plot(model_specifiers: List[MLFlowModelSpecifier]):
 
     mlflow.set_experiment('xgb.df.compare_models_plot')
     with mlflow.start_run():
+        # MLFlow Artifact
         mlflow.log_figure(fig, 'model_eval_comparison.png')
 
 
 @flow(log_prints=True)
 def compare_models(model_specifiers: List[MLFlowModelSpecifier]):
-
     mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
     client = MlflowClient()
 
@@ -150,4 +148,4 @@ def compare_models(model_specifiers: List[MLFlowModelSpecifier]):
         evaluate_model(md, eval_df)
 
     # Generate and log performance-over-time plot
-    generate_performance_plot(model_specifiers)
+    generate_performance_plot([ms.name for ms in model_specifiers])
