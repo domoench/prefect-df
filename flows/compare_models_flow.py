@@ -35,6 +35,11 @@ def fetch_eval_dataset() -> pd.DataFrame:
 
 @task
 def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
+    """For the given model, evaluate it on the given evaluation set, logging
+    the following to mlflow:
+    - A plot artifact comparing the predicted timeseries against the target.
+    - Regressor performance metrics
+    """
     end_ts_str = model_info.run.data.params['dvc.dataset.train.end']
     train_end_ts = parse_compact_ts_str(end_ts_str)
     eval_start_ts = eval_df.index.min()
@@ -45,7 +50,25 @@ def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
     mlflow.set_experiment('xgb.df.compare_models')
     run_name = f'{model_info.specifier.name}-v{model_info.specifier.version}_eval'
     model = model_info.model
+
+    # Visualize the models prediction vs target for the eval dataset
+    X = eval_df[TIME_FEATURES]
+    y = eval_df[TARGET]
+    y_pred = model.predict(X)
+    fig, axs = plt.subplots(1, 1, figsize=(12, 8))
+    plt.plot(X.index, y, label='target')
+    plt.plot(X.index, y_pred, label='prediction')
+    plt.xlabel('Date')
+    plt.xticks(rotation=45)
+    plt.ylabel('Demand')
+    plt.title(run_name)
+    plt.legend()
+    plt.close(fig)
+
     with mlflow.start_run(run_name=run_name):
+        # Log the pred vs target visualization
+        mlflow.log_figure(fig, 'pred_vs_target.png')
+
         # Evaluate the function without logging the model
         result = mlflow.evaluate(
             model=model,
