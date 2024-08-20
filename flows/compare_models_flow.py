@@ -5,7 +5,7 @@ from typing import List
 from flows.etl_flow import get_eia_data_as_df, transform
 from flows.train_model_flow import clean_data, features
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
-from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TARGET
+from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TIME_FEATURES, TARGET
 from core.utils import mlflow_model_uri, parse_compact_ts_str
 import os
 import matplotlib.pyplot as plt
@@ -29,7 +29,6 @@ def fetch_eval_dataset() -> pd.DataFrame:
     df = transform(df)
     df = clean_data(df)
     df = features(df)
-    df = df.drop(columns=['respondent'])  # TODO remove this in ETL?
     print(f'Eval data df:\n{df}')
     return df
 
@@ -50,7 +49,7 @@ def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
         # Evaluate the function without logging the model
         result = mlflow.evaluate(
             model=model,
-            data=eval_df,
+            data=eval_df[TIME_FEATURES + [TARGET]],
             targets=TARGET,
             model_type='regressor',
             evaluators=['default'],

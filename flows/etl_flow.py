@@ -99,7 +99,7 @@ def transform(eia_df: pd.DataFrame):
     # Merge in the demand timeseries
     merge_df = pd.merge(
         dt_df,
-        demand_df[['UTC period', 'respondent', 'value']].rename(columns={'value': 'D'}),
+        demand_df[['UTC period', 'value']].rename(columns={'value': 'D'}),
         left_on='utc_ts',
         right_on='UTC period',
         how='left',
