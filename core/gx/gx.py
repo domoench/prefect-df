@@ -46,6 +46,8 @@ def run_gx_checkpoint(suite_name, df):
     )
     result = checkpoint.run(result_format='BASIC')
     if not result['success']:
+        # TODO: Something more robust. Log event to datadog for monitoring?
+        # Generate data doc artifact?
         print(f'GX Checkpoint failure: checkpoint_name:{checkpoint_name}')
         print(result.list_validation_results())
     else:
