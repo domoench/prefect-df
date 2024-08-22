@@ -2,13 +2,12 @@
 
 FROM python:3.10-slim-buster
 
-RUN python -m pip install mlflow
+RUN python -m pip install mlflow psycopg2-binary
 
 # Install useful commandline tools
 RUN apt-get update \
     && apt-get install -y curl htop vim ncdu tree \
     && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 5001
-
-CMD ["mlflow", "server", "--host", "0.0.0.0", "--port", "5001"]
+CMD mlflow server --host 0.0.0.0 --port ${MLFLOW_TRACKING_PORT} \
+    --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}

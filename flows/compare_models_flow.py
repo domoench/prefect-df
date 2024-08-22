@@ -6,7 +6,7 @@ from flows.etl_flow import get_eia_data_as_df, transform
 from flows.train_model_flow import clean_data, features
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
 from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TIME_FEATURES, TARGET
-from core.utils import mlflow_model_uri, parse_compact_ts_str
+from core.utils import mlflow_model_uri, parse_compact_ts_str, mlflow_endpoint_uri
 import os
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -91,7 +91,7 @@ def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
 @task
 def generate_performance_plot(model_names: List[str]):
     # Fetch experiment runs from mlflow
-    mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
+    mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     experiment_name = 'xgb.df.compare_models'
     runs = mlflow.search_runs(experiment_names=[experiment_name])
     print(f'Summary of runs for experiment {experiment_name}:')
@@ -142,7 +142,7 @@ def generate_performance_plot(model_names: List[str]):
 
 @flow(log_prints=True)
 def compare_models(model_specifiers: List[MLFlowModelSpecifier]):
-    mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
+    mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     client = MlflowClient()
 
     # Fetch models from model registry

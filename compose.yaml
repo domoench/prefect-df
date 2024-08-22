@@ -21,8 +21,8 @@ services:
     volumes:
       - "minio:/data"
     ports:
-      - 9000:9000
-      - 9001:9001
+      - "${MINIO_API_PORT}:${MINIO_API_PORT}"
+      - "${MINIO_UI_PORT}:${MINIO_UI_PORT}"
 
   # MLFlow Tracking server
   mlflow:
@@ -31,7 +31,18 @@ services:
     env_file:
       - .env
     ports:
-      - 5001:5001
+      - "${MLFLOW_TRACKING_PORT}:${MLFLOW_TRACKING_PORT}"
+
+  # Postgres (MLFlow tracking server backend store)
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+    volumes:
+     - db:/var/lib/postgresql/data
 
   # Jupyter lab container
   jupyter:
@@ -45,10 +56,11 @@ services:
       - ./notebooks:/app/notebooks
       - ./data:/app/data
     ports:
-      - 8888:8888
+      - "${JUPYTER_PORT}:${JUPYTER_PORT}"
 
 volumes:
   minio:
+  db:
 networks:
   default:
     name: df-network

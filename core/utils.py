@@ -39,6 +39,11 @@ MLFlow utils
 """
 
 
+def mlflow_endpoint_uri():
+    port = os.getenv('MLFLOW_TRACKING_PORT')
+    return f'http://mlflow:{port}'
+
+
 def mlflow_model_uri(ms: MLFlowModelSpecifier) -> str:
     name = ms.name
     version = ms.version
@@ -61,6 +66,10 @@ def df_summary(df) -> str:
 Persistance
 """
 
+def minio_endpoint_url():
+    port = os.getenv('MINIO_API_PORT'),
+    return f'http://minio:{port}'
+
 
 def get_s3_client():
     # If dev, connect to minio
@@ -68,7 +77,7 @@ def get_s3_client():
     if df_env == 'dev':
         s3_client = boto3.client(
             's3',
-            endpoint_url=os.getenv('MINIO_ENDPOINT_URL'),
+            endpoint_url=minio_endpoint_url()),
             aws_access_key_id=os.getenv('MINIO_ROOT_USER'),
             aws_secret_access_key=os.getenv('MINIO_ROOT_PASSWORD'),
             region_name=os.getenv('AWS_DEFAULT_REGION')

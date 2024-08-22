@@ -6,10 +6,9 @@ from core.data import (
 )
 from core.types import DVCDatasetInfo
 from core.model import train_xgboost
-from core.utils import compact_ts_str
+from core.utils import compact_ts_str, mlflow_endpoint_uri
 from core.gx.gx import run_gx_checkpoint
 import mlflow
-import os
 import pandas as pd
 
 
@@ -68,7 +67,7 @@ def train_xgb_with_tracking(train_df: pd.DataFrame, dvc_dataset_info: DVCDataset
     run_gx_checkpoint('train', train_df)
 
     # MLFlow Tracking
-    mlflow.set_tracking_uri(uri=os.getenv('MLFLOW_ENDPOINT_URI'))
+    mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     mlflow.set_experiment('xgb.df.train')
     with mlflow.start_run():
         mlflow_emit_tags_and_params(train_df, dvc_dataset_info)
