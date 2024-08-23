@@ -12,24 +12,14 @@ services:
       - ./flows:/opt/prefect/flows
       - ./core:/opt/prefect/core
 
-  # OBJECT STORAGE
-  minio:
-    build:
-      context: ./services/minio
-    env_file:
-      - .env
-    volumes:
-      - "minio:/data"
-    ports:
-      - "${MINIO_API_PORT}:${MINIO_API_PORT}"
-      - "${MINIO_UI_PORT}:${MINIO_UI_PORT}"
-
   # MLFlow Tracking server
   mlflow:
     build:
       context: ./services/mlflow
     env_file:
       - .env
+    environment:
+      AWS_ENDPOINT_URL: "http://minio:${MINIO_API_PORT}"
     ports:
       - "${MLFLOW_TRACKING_PORT}:${MLFLOW_TRACKING_PORT}"
 
@@ -58,9 +48,40 @@ services:
     ports:
       - "${JUPYTER_PORT}:${JUPYTER_PORT}"
 
+  # OBJECT STORAGE
+  minio:
+    image: minio/minio
+    env_file:
+      - .env
+    volumes:
+      - minio:/data
+    ports:
+      - "${MINIO_API_PORT}:${MINIO_API_PORT}"
+      - "${MINIO_UI_PORT}:${MINIO_UI_PORT}"
+    healthcheck:
+      test: timeout 5s bash -c ":> /dev/tcp/127.0.0.1/${MINIO_API_PORT}" || exit 1
+      interval: 1s
+      timeout: 10s
+      retries: 5
+    command: server /data --console-address "0.0.0.0:${MINIO_API_PORT}" --console-address "0.0.0.0:${MINIO_UI_PORT}"
+
+  # Create necessary buckets
+  minio-create-bucket:
+    image: minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      bash -c "
+      mc alias set minio http://minio:${MINIO_API_PORT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD} &&
+      mc mb minio/mlflow-artifacts
+      mc mb minio/timeseries
+      "
+
 volumes:
   minio:
   db:
 networks:
   default:
     name: df-network
+

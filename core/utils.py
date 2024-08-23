@@ -66,8 +66,9 @@ def df_summary(df) -> str:
 Persistance
 """
 
+
 def minio_endpoint_url():
-    port = os.getenv('MINIO_API_PORT'),
+    port = os.getenv('MINIO_API_PORT')
     return f'http://minio:{port}'
 
 
@@ -77,7 +78,7 @@ def get_s3_client():
     if df_env == 'dev':
         s3_client = boto3.client(
             's3',
-            endpoint_url=minio_endpoint_url()),
+            endpoint_url=minio_endpoint_url(),
             aws_access_key_id=os.getenv('MINIO_ROOT_USER'),
             aws_secret_access_key=os.getenv('MINIO_ROOT_PASSWORD'),
             region_name=os.getenv('AWS_DEFAULT_REGION')

@@ -50,7 +50,7 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
     This function assumes it will be called in an mlflow run context.
     """
     mlflow.set_tags({
-        'prefect_flow_run': runtime.flow_run.name,
+        'prefect_flow_run': getattr(runtime.flow_run, 'name', None),
     })
 
     mlflow.log_params({

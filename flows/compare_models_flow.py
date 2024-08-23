@@ -7,7 +7,6 @@ from flows.train_model_flow import clean_data, features
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
 from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TIME_FEATURES, TARGET
 from core.utils import mlflow_model_uri, parse_compact_ts_str, mlflow_endpoint_uri
-import os
 import matplotlib.pyplot as plt
 import pandas as pd
 import mlflow
