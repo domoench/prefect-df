@@ -20,6 +20,8 @@ services:
       - .env
     environment:
       AWS_ENDPOINT_URL: "http://minio:${MINIO_API_PORT}"
+      MLFLOW_BACKEND_STORE_URI: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}"
+
     ports:
       - "${MLFLOW_TRACKING_PORT}:${MLFLOW_TRACKING_PORT}"
 
