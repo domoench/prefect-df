@@ -35,8 +35,10 @@ demand data.
 - Experiment tracking: MLFlow
 - Dataset version tracking and 'Data Warehouse': DVC (+ git repo)
 - Model: XGBoost
+- Prod Env: AWS Copilot-managed containers on Fargate.
 
 # References
 
 - Géron, Aurélien. Hands-on machine learning with Scikit-Learn, Keras, and TensorFlow. "O'Reilly Media, Inc.", 2022.
 - [Rob Mulla's Kaggle tutorial](https://www.kaggle.com/code/robikscube/pt2-time-series-forecasting-with-xgboost/notebook) on timeseries forecasting with XGBoost
+- [Prefect ECS Workers](https://docs.prefect.io/integrations/prefect-aws/ecs_guide)
