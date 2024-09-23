@@ -27,6 +27,7 @@ ipykernel = "*"
 seaborn = "*"
 griffe = "==0.49.0"
 great-expectations = "*"
+prefect-aws = "*"
 
 [dev-packages]
 flake8 = "*"

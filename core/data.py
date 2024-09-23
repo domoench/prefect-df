@@ -5,7 +5,6 @@ Module containing logic for getting and persisting data, and feature engineering
 from scipy.stats import skew
 from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
-from prefect.blocks.system import Secret
 from core.types import DVCDatasetInfo
 from core.gx.gx import run_gx_checkpoint
 import numpy as np
@@ -95,7 +94,7 @@ DVC
 
 def get_dvc_remote_repo_url(github_PAT: str = None) -> str:
     if github_PAT is None:
-        github_PAT = Secret.load('github-pat-dvc-dev').get()
+        github_PAT = os.getenv('DVC_GIT_REPO_PAT')
     github_username = os.getenv('DVC_GIT_USERNAME')
     github_reponame = os.getenv('DVC_GIT_REPONAME')
     return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'

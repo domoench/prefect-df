@@ -37,6 +37,14 @@ demand data.
 - Model: XGBoost
 - Prod Env: AWS Copilot-managed containers on Fargate.
 
+# Development
+
+Prefect Flow deployment:
+
+```
+ prefect deploy --name DEPLOYMENT_NAME --prefect-file flows/prefect.yaml
+```
+
 # References
 
 - Géron, Aurélien. Hands-on machine learning with Scikit-Learn, Keras, and TensorFlow. "O'Reilly Media, Inc.", 2022.
