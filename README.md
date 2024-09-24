@@ -42,7 +42,7 @@ demand data.
 Prefect Flow deployment:
 
 ```
- prefect deploy --name DEPLOYMENT_NAME --prefect-file flows/prefect.yaml
+ prefect deploy --name DEPLOYMENT_NAME --prefect-file flows/deployments/FLOW_DEPLOYMENT_CONFIG.yaml
 ```
 
 # References
