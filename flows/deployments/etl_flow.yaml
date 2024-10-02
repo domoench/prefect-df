@@ -1,8 +1,7 @@
 # Defining prefect flow image deployments
 # https://docs.prefect.io/3.0/deploy/infrastructure-concepts/prefect-yaml#define-deployments-with-yaml
 name: etl_flow
-# this is pre-populated by running prefect init
-prefect-version: 2.19.7
+prefect-version: 3.0.4
 
 build:
 - prefect_docker.deployments.steps.build_docker_image:

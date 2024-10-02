@@ -2,7 +2,7 @@
 
 # Python dependencies layer for the Prefect flow execution images
 
-FROM prefecthq/prefect:2-python3.10
+FROM prefecthq/prefect:3.0.4-python3.10
 
 WORKDIR /opt/prefect/prefect-df/
 
