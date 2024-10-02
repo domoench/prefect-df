@@ -67,7 +67,7 @@ services:
       retries: 5
     command: server /data --console-address "0.0.0.0:${MINIO_API_PORT}" --console-address "0.0.0.0:${MINIO_UI_PORT}"
 
-  # Create necessary buckets
+  # Create necessary minio buckets
   minio-create-bucket:
     image: minio/mc
     depends_on:
@@ -79,6 +79,16 @@ services:
       mc mb minio/mlflow-artifacts
       mc mb minio/timeseries
       "
+
+  # FLOW EXE{CUTION IMAGE PYTHON DEPENDENCIES
+  flow-deps:
+    image: "${AWS_ECR_ENDPOINT}/prefect-df/flows/flow-deps:latest"
+    build:
+      context: ./services/flow-deps
+    env_file:
+      - .env
+    platform: linux/amd64
+
 
 volumes:
   minio:

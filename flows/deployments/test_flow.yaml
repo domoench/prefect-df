@@ -10,8 +10,10 @@ build:
     requires: prefect-docker==0.3.1
     image_name: 326060909633.dkr.ecr.us-west-2.amazonaws.com/prefect-df/flows/test_flow
     tag: latest
-    dockerfile: auto
+    dockerfile: flows/deployments/Dockerfile
     platform: linux/amd64
+    buildargs:
+      AWS_ECR_ENDPOINT: 326060909633.dkr.ecr.us-west-2.amazonaws.com
 
 push:
 - prefect_docker.deployments.steps.push_docker_image:
