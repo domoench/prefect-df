@@ -1,7 +1,6 @@
 # Defining prefect flow image deployments
 # https://docs.prefect.io/3.0/deploy/infrastructure-concepts/prefect-yaml#define-deployments-with-yaml
 name: test_flow
-# this is pre-populated by running prefect init
 prefect-version: 3.0.4
 
 build:
@@ -12,8 +11,6 @@ build:
     tag: latest
     dockerfile: flows/deployments/Dockerfile
     platform: linux/amd64
-    buildargs:
-      AWS_ECR_ENDPOINT: 326060909633.dkr.ecr.us-west-2.amazonaws.com
 
 push:
 - prefect_docker.deployments.steps.push_docker_image:

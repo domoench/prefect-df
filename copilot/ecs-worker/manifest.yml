@@ -28,7 +28,6 @@ taskdef_overrides:
 secrets:                      # Pass secrets from AWS Systems Manager (SSM) Parameter Store.
   PREFECT_API_URL: /copilot/prefect-df/prod/secrets/prefect_api_url
   PREFECT_API_KEY: /copilot/prefect-df/prod/secrets/prefect_api_key
-  DVC_GIT_REPO_PAT: /copilot/prefect-df/prod/secrets/dvc_repo_github_PAT
 
 environments:
   prod:

@@ -6,3 +6,4 @@ docker push ${AWS_ECR_ENDPOINT}/prefect-df/flows/flow-deps:latest
 
 # Build flow execution images
 prefect deploy --name test_flow --prefect-file flows/deployments/test_flow.yaml
+prefect deploy --name etl_flow --prefect-file flows/deployments/etl_flow.yaml

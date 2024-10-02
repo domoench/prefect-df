@@ -7,6 +7,7 @@ from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
 from core.types import DVCDatasetInfo
 from core.gx.gx import run_gx_checkpoint
+from prefect.blocks.system import Secret
 import numpy as np
 import pandas as pd
 import dvc.api
@@ -72,11 +73,14 @@ def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
            'sort[0][column]=period&sort[0][direction]=asc')
 
+    eia_api_key_block = Secret.load('eia-api-key')
+    eia_api_key = eia_api_key_block.get()
+
     # Use list of tuples instead of dict to allow duplicate params
     params = [
       ('offset', offset),
       ('length', length),
-      ('api_key', os.environ['EIA_API_KEY']),
+      ('api_key', eia_api_key),
       ('start', start_ts.strftime('%Y-%m-%dT%H')),
       ('end', end_ts.strftime('%Y-%m-%dT%H')),
       ('facets[type][]', 'D'),
@@ -94,7 +98,10 @@ DVC
 
 def get_dvc_remote_repo_url(github_PAT: str = None) -> str:
     if github_PAT is None:
-        github_PAT = os.getenv('DVC_GIT_REPO_PAT')
+        if os.getenv('DF_ENVIRONMENT') == 'prod':
+            github_PAT = Secret.load('dvc-git-repo-pat-prod').get()
+        else:
+            github_PAT = os.getenv('DVC_GIT_REPO_PAT')
     github_username = os.getenv('DVC_GIT_USERNAME')
     github_reponame = os.getenv('DVC_GIT_REPONAME')
     return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
