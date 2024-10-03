@@ -2,7 +2,6 @@ from flows.etl_flow import etl
 from flows.train_model_flow import train_model
 from flows.etl_and_train_flow import etl_and_train
 from flows.compare_models_flow import compare_models
-from flows.test_flow import test_flow
 
 
 if __name__ == "__main__":
@@ -41,15 +40,6 @@ if __name__ == "__main__":
         entrypoint="compare_models_flow.py:compare_models",
     ).deploy(
         name="compare_models",
-        work_pool_name="lf-dev",
-    )
-
-    # TODO remove
-    test_flow.from_source(
-        source="/opt/prefect/flows/",
-        entrypoint="test_flow.py:test_flow",
-    ).deploy(
-        name="test_flow",
         work_pool_name="lf-dev",
     )
 
