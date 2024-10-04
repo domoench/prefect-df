@@ -13,6 +13,10 @@ from core.types import MLFlowModelSpecifier
 from core.consts import EIA_BUFFER_HOURS
 
 
+class InvalidExecutionEnvironmentError(Exception):
+    pass
+
+
 """
 datetime utils
 """
@@ -41,7 +45,14 @@ MLFlow utils
 
 def mlflow_endpoint_uri():
     port = os.getenv('MLFLOW_TRACKING_PORT')
-    return f'http://mlflow:{port}'
+    df_env = os.getenv('DF_ENVIRONMENT')
+    if df_env == 'prod':
+        service_name = os.getenv('MLFLOW_SERVICE_ENDPOINT_PRIVATE')
+        return f'http://{service_name}:{port}'
+    elif df_env == 'dev':
+        return f'http://mlflow:{port}'
+    else:
+        raise InvalidExecutionEnvironmentError(df_env)
 
 
 def mlflow_model_uri(ms: MLFlowModelSpecifier) -> str:
@@ -85,9 +96,10 @@ def get_s3_client():
         )
     # Production connects to s3
     elif df_env == 'prod':
+        # TODO this is no longer true
         raise Exception('No such thing as production environment yet.')
     else:
-        raise Exception(f'Unknown environment: {df_env}')
+        raise InvalidExecutionEnvironmentError(df_env)
     return s3_client
 
 
