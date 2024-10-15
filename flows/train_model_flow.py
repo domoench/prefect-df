@@ -1,4 +1,5 @@
 from prefect import flow, task, runtime
+from prefect.exceptions import ObjectNotFound
 from core.consts import EIA_TEST_SET_HOURS, EIA_MAX_D_VAL, EIA_MIN_D_VAL
 from core.data import (
     add_temporal_features, cap_column_outliers, impute_null_demand_values,
@@ -49,8 +50,13 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
 
     This function assumes it will be called in an mlflow run context.
     """
+    flow_run_name = None
+    try:
+        flow_run_name = getattr(runtime.flow_run, 'name', None)
+    except ObjectNotFound:
+        pass  # We are not in a prefect flow context
     mlflow.set_tags({
-        'prefect_flow_run': getattr(runtime.flow_run, 'name', None),
+        'prefect_flow_run': flow_run_name,
     })
 
     mlflow.log_params({
