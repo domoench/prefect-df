@@ -5,6 +5,10 @@ serviceNames=$(aws ecs list-services --cluster $AWS_ECS_CLUSTER | jq '.serviceAr
 function describe_infra() {
   echo "  RDS Instance: ${AWS_RDS_INSTANCE_ID}"
   echo "  ECS Cluster: ${AWS_ECS_CLUSTER}"
+  echo "  EC2 Jumpbox:"
+  echo "    Instance ID: ${AWS_JUMPBOX_INSTANCE_ID}"
+  echo "    Public DNS: $(aws ec2 describe-instances --instance-ids $AWS_JUMPBOX_INSTANCE_ID | jq  '.Reservations.[].Instances.[].PublicDnsName')"
+
   echo "  ECS Service Names:"
   for serviceName in $serviceNames;
   do
@@ -12,8 +16,7 @@ function describe_infra() {
   done
 }
 
-if [ $1 = 'start' ]; then
-
+function start_infra() {
   echo "Starting AWS Infra"
   describe_infra
 
@@ -22,7 +25,8 @@ if [ $1 = 'start' ]; then
   aws rds start-db-instance --db-instance-identifier $AWS_RDS_INSTANCE_ID > /dev/null
 
   # EC2 Jumpbox
-  # TODO
+  echo "Starting EC2 Jumpbox instance: ${AWS_JUMPBOX_INSTANCE_ID}"
+  aws ec2 start-instances --instance-ids $AWS_JUMPBOX_INSTANCE_ID > /dev/null
 
   # ECS
 
@@ -49,9 +53,9 @@ if [ $1 = 'start' ]; then
     --service \prefect-df-prod-mlflow-Service-J4WXZZgxgZ8D \
     --desired-count 1 \
     > /dev/null
-fi
+}
 
-if [ $1 = 'stop' ]; then
+function stop_infra() {
   echo "Stopping AWS Infra"
   describe_infra
 
@@ -60,7 +64,8 @@ if [ $1 = 'stop' ]; then
   aws rds stop-db-instance --db-instance-identifier $AWS_RDS_INSTANCE_ID > /dev/null
 
   # EC2 Jumpbox
-  # TODO
+  echo "Stopping EC2 instance: ${AWS_JUMPBOX_INSTANCE_ID}"
+  aws ec2 stop-instances --instance-ids $AWS_JUMPBOX_INSTANCE_ID > /dev/null
 
   # ECS
   echo "Updating ECS services' desired task counts to 0"
@@ -75,6 +80,16 @@ if [ $1 = 'stop' ]; then
     --service \prefect-df-prod-mlflow-Service-J4WXZZgxgZ8D \
     --desired-count 0 \
     > /dev/null
-fi
+}
 
+if [[ $1 == 'start' ]]; then
+  start_infra
+elif [[ $1 = 'stop' ]]; then
+  stop_infra
+elif [[ $1 = 'describe' ]]; then
+  describe_infra
+else
+  echo "Argument must be 'start', 'stop', or 'describe'"
+  exit
+fi
 echo "Done"
