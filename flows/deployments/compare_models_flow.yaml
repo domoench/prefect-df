@@ -1,0 +1,33 @@
+# Defining prefect flow image deployments
+# https://docs.prefect.io/3.0/deploy/infrastructure-concepts/prefect-yaml#define-deployments-with-yaml
+name: compare_models_flow
+prefect-version: 3.0.4
+
+build:
+- prefect_docker.deployments.steps.build_docker_image:
+    id: build_image
+    requires: prefect-docker==0.3.1
+    image_name: 326060909633.dkr.ecr.us-west-2.amazonaws.com/prefect-df/flows/compare_models_flow
+    tag: latest
+    dockerfile: flows/deployments/Dockerfile
+    platform: linux/amd64
+
+push:
+- prefect_docker.deployments.steps.push_docker_image:
+    requires: prefect-docker==0.3.1
+    image_name: '{{ build_image.image_name }}'
+    tag: '{{ build_image.tag }}'
+
+deployments:
+  - name: compare_models_flow
+    entrypoint: flows/compare_models_flow.py:compare_models
+    work_pool:
+      name: df-prod
+      job_variables:
+        image: '{{ build_image.image }}'
+        tag: '{{ build_image.tag }}'
+    schedules: []
+
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: /opt/prefect/prefect-df

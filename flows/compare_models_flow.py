@@ -8,6 +8,7 @@ from core.types import MLFlowModelSpecifier, MLFlowModelInfo
 from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TIME_FEATURES, TARGET
 from core.utils import mlflow_model_uri, parse_compact_ts_str, mlflow_endpoint_uri
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import mlflow
 
@@ -117,9 +118,9 @@ def generate_performance_plot(model_names: List[str]):
     for model_name in model_names:
         model_runs_df = runs[runs['params.model_name'] == model_name]
         model_versions = model_runs_df['params.model_version'].unique()
-        for i, metric in enumerate(metrics):
-            for v in model_versions:
-                df = model_runs_df[model_runs_df['params.model_version'] == v]
+        for v in model_versions:
+            df = model_runs_df[model_runs_df['params.model_version'] == v]
+            for i, metric in enumerate(metrics):
                 axs[i].set_title(metric)
                 axs[i].plot(df.start_time, df[f'metrics.{metric}'],
                             marker='o', label=f'{model_name}-v{v}')
@@ -163,4 +164,5 @@ def compare_models(model_specifiers: List[MLFlowModelSpecifier]):
         evaluate_model(md, eval_df)
 
     # Generate and log performance-over-time plot
-    generate_performance_plot([ms.name for ms in model_specifiers])
+    model_names = np.unique([ms.name for ms in model_specifiers])
+    generate_performance_plot(model_names)
