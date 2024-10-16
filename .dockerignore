@@ -35,5 +35,4 @@ README.md
 Pipfile.lock
 **/copilot
 data/
-scripts/
 notebooks/

@@ -9,6 +9,14 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # the application crashes without emitting any logs due to buffering.
 ENV PYTHONUNBUFFERED=1
 
+# Copy core and flow python code to the container for use by adhoc
+# scripts executed on the ecs-worker container (e.g. to register baseline
+# model in mlflow).
+# Note: Build context set in the copilot manifest file
+COPY core /app/core
+COPY flows /app/flows
+COPY scripts/python /app/scripts/python
+
 # Install useful commandline tools
 RUN apt-get update \
     && apt-get install -y curl htop vim ncdu tree \
@@ -19,7 +27,7 @@ RUN apt-get update \
 # Leverage a bind mount to requirements.txt to avoid having to copy them into
 # into this layer.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    --mount=type=bind,source=requirements.txt,target=requirements.txt \
+    --mount=type=bind,source=services/ecs-worker/requirements.txt,target=requirements.txt \
     python -m pip install -r requirements.txt
 
 CMD ["/bin/sh", "-c", "prefect worker start --pool df-prod --type ecs" ]
