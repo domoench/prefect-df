@@ -5,7 +5,7 @@ EIA_BUFFER_HOURS = 2 * 24
 
 # Ensure the number of hours available to the evaluation set (to be excluded
 # from training.
-EIA_TEST_SET_HOURS = 2 * 7 * 24
+EIA_TEST_SET_HOURS = 4 * 7 * 24
 
 # Maximum number of rows to request in one call to the EIA API
 EIA_MAX_REQUEST_ROWS = 5000
