@@ -144,7 +144,7 @@ def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
     if len(diff_files) > 0:
         print(f'Staged files:\n{diff_files}')
         commit_msg = f'Add dataset.\n' \
-            f'start:{compact_ts_str(start_ts)}\nend:{compact_ts_str(start_ts)}\n\n' \
+            f'start:{compact_ts_str(start_ts)}\nend:{compact_ts_str(end_ts)}\n\n' \
             f'{df_summary(df)}'
         commit = git_repo.index.commit(commit_msg)
         git_commit_hash = str(commit)
