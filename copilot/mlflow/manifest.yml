@@ -39,5 +39,6 @@ secrets:                      # Pass secrets from AWS Systems Manager (SSM) Para
 environments:
   prod:
     variables:
+      DF_ENVIRONMENT: prod
       MLFLOW_TRACKING_PORT: 5001
       MLFLOW_ARTIFACTS_DESTINATION: "s3://df-mlflow-artifacts"
