@@ -90,6 +90,13 @@ def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
 
 @task
 def generate_performance_plot(model_names: List[str]):
+    """Create a performance evaluation comparison plot for all versions of the
+    given models over time.
+
+    TODO: Probably a good idea to pass in a whitelist of model specifiers instead, so
+    the plot can filter the number of (model,version) timeseries to display. It's
+    starting to get cluttered including every (model,version) that ever existed.
+    """
     # Fetch experiment runs from mlflow
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     experiment_name = 'xgb.df.compare_models'
