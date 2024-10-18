@@ -78,9 +78,9 @@ def transform(eia_df: pd.DataFrame):
     eia_df['UTC period'] = pd.to_datetime(eia_df['period'], utc=True)
     eia_df['value'] = pd.to_numeric(eia_df['value'])
 
-    # Careful, EIA results can have duplicates (at the boundaries of the pages)
+    # EIA results can have duplicates (at the boundaries of the pages)
     # And such behavior seems to be non-deterministic.
-    # Remove duplicates
+    # Remove those duplicates
     eia_df = eia_df.drop_duplicates(subset=['UTC period', 'value', 'type'])
 
     # In the EIA API response, for any given hour, there are between 0 and 1 records:
