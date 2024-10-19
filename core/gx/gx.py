@@ -1,5 +1,6 @@
 import great_expectations as gx
-from core.gx.suites import EXPECTATION_SUITES
+from core.gx.suites import add_expectation_suites
+from datetime import datetime
 
 GX_DATASOURCE_NAME = 'pandas_datasource'
 
@@ -7,7 +8,6 @@ GX_DATASOURCE_NAME = 'pandas_datasource'
 gx_ctx = None
 
 
-# TODO: Switch to FileDataContext instead of ephermeral?
 def get_gx_context():
     global gx_ctx
     if gx_ctx is None:
@@ -17,15 +17,10 @@ def get_gx_context():
 
 def initialize_gx():
     """Set up the great expectations context and expectation suites"""
-    gx_ctx = gx.get_context()
+    print('Initializing great expectation data context and suites.')
+    gx_ctx = gx.get_context(mode='ephemeral')
     gx_ctx.data_sources.add_pandas(name=GX_DATASOURCE_NAME)
-
-    for s in EXPECTATION_SUITES:
-        # suite = gx_ctx.suites.add(name=s['name'])
-        suite = gx.ExpectationSuite(name=s['name'])
-        gx_ctx.suites.add(suite)
-        for expectation in s['expectations']:
-            suite.add_expectation(expectation)
+    add_expectation_suites(gx_ctx)
 
     return gx_ctx
 
@@ -36,7 +31,8 @@ def run_gx_checkpoint(suite_name, df):
 
     # Connect Data
     data_source = gx_ctx.get_datasource(name=GX_DATASOURCE_NAME)
-    df_asset_name = f'{suite_name}-df'
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    df_asset_name = f'{suite_name}-df-{timestamp}'
     data_asset = data_source.add_dataframe_asset(name=df_asset_name)
     batch_definition = data_asset.add_batch_definition_whole_dataframe(f'{df_asset_name}-batch_def')
 
