@@ -1,12 +1,28 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from mlflow.pyfunc import PyFuncModel
 from mlflow.entities import Run
 
 
 class DVCDatasetInfo(BaseModel):
+    # Git URL
     repo: str
+    # Path to the dataset file in the DVC repo directory
     path: str
+    # Git commit for this DVC dataset version
     rev: str
+
+
+"""
+Core model types
+"""
+
+
+# Specify which groups of features (in addition to the base features) the
+# xgboost model should take as input
+class ModelFeatureFlags(BaseModel):
+    lag: bool = False
+    weather: bool = False
+    holidays: bool = False
 
 
 """
@@ -20,9 +36,7 @@ class MLFlowModelSpecifier(BaseModel):
 
 
 class MLFlowModelInfo(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
     specifier: MLFlowModelSpecifier
     model: PyFuncModel
     run: Run
-
-    class Config:
-        arbitrary_types_allowed = True

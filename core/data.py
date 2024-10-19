@@ -16,9 +16,9 @@ import os
 import requests
 
 
-def add_temporal_features(df):
-    """Given a DataFrame with a datetime index, return a copy with
-    added temporal feature columns."""
+def add_time_meaning_features(df):
+    """Given a DataFrame with a datetime index, return a copy with added
+    context on the meaning of a timestamp - e.g. month, day of week etc."""
     df = df.copy()
     df['hour'] = df.index.hour
     df['month'] = df.index.month
@@ -27,6 +27,22 @@ def add_temporal_features(df):
     df['dayofweek'] = df.index.dayofweek
     df['dayofmonth'] = df.index.day
     df['dayofyear'] = df.index.dayofyear
+    return df
+
+
+def add_time_lag_features(df):
+    """Add lag timeseries features to the given dataframe based on its index.
+
+    Note: This produces many NaN values in the lag columns. For example, you can't
+    add lagged values to the oldest timestamp.
+    TODO: Does xgboost do ok with these null values? I assume so, but confirm.
+    """
+    df = df.copy()
+    ts_to_D = df.D.to_dict()
+    # Trick: Offset by 364 days => lagged day is same day of week
+    df['lag_1y'] = (df.index - pd.Timedelta('364 days')).map(ts_to_D)
+    df['lag_2y'] = (df.index - pd.Timedelta('728 days')).map(ts_to_D)
+    df['lag_3y'] = (df.index - pd.Timedelta('1092 days')).map(ts_to_D)
     return df
 
 

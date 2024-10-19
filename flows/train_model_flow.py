@@ -2,19 +2,27 @@ from prefect import flow, task, runtime
 from prefect.exceptions import ObjectNotFound
 from core.consts import EIA_TEST_SET_HOURS, EIA_MAX_D_VAL, EIA_MIN_D_VAL
 from core.data import (
-    add_temporal_features, cap_column_outliers, impute_null_demand_values,
-    get_dvc_dataset_as_df, get_dvc_dataset_url,
+    add_time_meaning_features, add_time_lag_features, cap_column_outliers,
+    impute_null_demand_values, get_dvc_dataset_as_df, get_dvc_dataset_url,
 )
-from core.types import DVCDatasetInfo
-from core.model import train_xgboost
+from core.types import DVCDatasetInfo, ModelFeatureFlags
+from core.model import train_xgboost, get_model_features
 from core.utils import compact_ts_str, mlflow_endpoint_uri
 from core.gx.gx import run_gx_checkpoint
 import mlflow
 import pandas as pd
+import xgboost
 
 
 @task
-def preprocess_data(df):
+def preprocess_data(df: int):  # TODO: Check if prefect does type checking on task arguments
+    """Data cleaning and feature engineering.
+
+    Args:
+        df: The full length (train + test time window) raw data set from the warehouse
+    Returns:
+        df: Training dataset (test set removed)
+    """
     # Feature Engineering
     df = clean_data(df)
     df = features(df)
@@ -22,7 +30,7 @@ def preprocess_data(df):
     # Remove a TEST_SET_SIZE window at the end, so that after cross validation
     # and refit, the final training set excludes that window for use by adhoc model
     # evaluation on the most recent TEST_SET_SIZE hours.
-    # TODO add expectation that rows are sorted by time
+    # TODO Write test to confirm test set is stripped of the end
     df = df[:-EIA_TEST_SET_HOURS]
     return df
 
@@ -39,7 +47,8 @@ def clean_data(df):
 @task
 def features(df):
     # Add temporal features
-    df = add_temporal_features(df)
+    df = add_time_meaning_features(df)
+    df = add_time_lag_features(df)
     print(df)
     return df
 
@@ -68,34 +77,47 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
 
 
 @task
-def train_xgb_with_tracking(train_df: pd.DataFrame, dvc_dataset_info: DVCDatasetInfo):
+def train_xgb_with_tracking(train_df: pd.DataFrame, features, dvc_dataset_info: DVCDatasetInfo):
     # Validate training data
     run_gx_checkpoint('train', train_df)
 
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     mlflow.set_experiment('xgb.df.train')
+    reg = None
     with mlflow.start_run():
         mlflow_emit_tags_and_params(train_df, dvc_dataset_info)
 
         # Cross validation training
         # TODO: Parameterize Optional Hyper param tuning
         mlflow.xgboost.autolog()
-        train_xgboost(train_df, hyperparam_tuning=False)
+        reg = train_xgboost(train_df, features, hyperparam_tuning=False)
+    return reg
 
 
 # TODO: parameterize hyperparam tuning option. Use pydantic?
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
-def train_model(dvc_dataset_info: DVCDatasetInfo, log_prints=True):
+def train_model(
+    dvc_dataset_info: DVCDatasetInfo,
+    mlflow_tracking: bool = True,
+    feature_flags: ModelFeatureFlags = ModelFeatureFlags(),
+    log_prints=True
+) -> xgboost.sklearn.XGBRegressor:
     """Train an XGBoost timeseries forecasting model
 
     Args:
         dvc_dataset_info: Describes which full dataset to pull from DVC. This timeseries
             dataset time span will cover the contiguous training and test set windows.
+        mlflow_tracking: Flag to enable/disable mlflow tracking
     """
     train_df = get_dvc_dataset_as_df(dvc_dataset_info)
 
     train_df = preprocess_data(train_df)
 
-    train_xgb_with_tracking(train_df, dvc_dataset_info)
+    features = get_model_features(feature_flags)
+
+    if mlflow_tracking:
+        return train_xgb_with_tracking(train_df, features, dvc_dataset_info)
+    else:
+        return train_xgboost(train_df, features, hyperparam_tuning=False)
