@@ -73,6 +73,12 @@ def df_summary(df) -> str:
            f'Dataframe summary:\n{df}\n'
 
 
+def create_timeseries_df_1h(start_ts, end_ts):
+    df = pd.DataFrame({'utc_ts': pd.date_range(start=start_ts, end=end_ts, freq='h')})
+    df = df.set_index('utc_ts')
+    return df
+
+
 """
 Persistance
 """

@@ -4,18 +4,26 @@ import pandas as pd
 from core.data import get_dvc_remote_repo_url, get_dvc_dataset_as_df
 from core.types import DVCDatasetInfo
 from core.consts import EIA_TEST_SET_HOURS
-from core.utils import mlflow_endpoint_uri
+from core.utils import mlflow_endpoint_uri, InvalidExecutionEnvironmentError
+from core.model import get_model_features
 from flows.train_model_flow import (
     clean_data, features, mlflow_emit_tags_and_params
 )
 
 
-git_PAT = os.getenv('DVC_GIT_REPO_PAT')
-git_repo_url = get_dvc_remote_repo_url(git_PAT)
+git_repo_url = get_dvc_remote_repo_url()
 
-# Get training data
-path = 'data/eia_d_df_2019-01-01_00_2024-09-30_00.parquet'
-rev = 'a2c13b81223c8a9f634e5688a10ccf0e1cbbb73c'
+# Get training data set
+df_env = os.getenv('DF_ENVIRONMENT')
+if df_env == 'prod':
+    path = 'data/eia_d_df_2019-01-01_00_2024-09-30_00.parquet'
+    rev = 'a2c13b81223c8a9f634e5688a10ccf0e1cbbb73c'
+elif df_env == 'dev':
+    path = 'data/eia_d_df_2019-01-01_00_2024-08-18_00.parquet'
+    rev = 'd427ae7c3b5afffc24ab806cf9538efc697b68bd'
+else:
+    raise InvalidExecutionEnvironmentError(df_env)
+
 dvc_dataset_info = DVCDatasetInfo(repo=git_repo_url, path=path, rev=rev)
 df = get_dvc_dataset_as_df(dvc_dataset_info)
 
@@ -46,9 +54,19 @@ class BaselineModel(mlflow.pyfunc.PythonModel):
 
 baseline_model = BaselineModel(demand_by_hour_month)
 
+# Do a quick dummy prediction to infer a signature
+features = get_model_features()  # Only baseline features
+X = df[features]
+y_pred = baseline_model.predict(None, X)
+signature = mlflow.models.infer_signature(X, y_pred)
+
 # Register basline model to mlflow
 mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
 mlflow.set_experiment('xgb.df.register_baseline')
 with mlflow.start_run():
     mlflow_emit_tags_and_params(df, dvc_dataset_info)
-    mlflow.pyfunc.log_model(artifact_path="baseline_model", python_model=baseline_model)
+    mlflow.pyfunc.log_model(
+        artifact_path="baseline_model",
+        python_model=baseline_model,
+        signature=signature
+    )

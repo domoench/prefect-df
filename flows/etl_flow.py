@@ -5,7 +5,7 @@ from core.data import request_EIA_data, get_dvc_remote_repo_url
 from core.types import DVCDatasetInfo
 from core.utils import (
     obj_key_with_timestamps, ensure_empty_dir, df_summary,
-    compact_ts_str, utcnow_minus_buffer_ts
+    compact_ts_str, utcnow_minus_buffer_ts, create_timeseries_df_1h
 )
 from datetime import datetime
 from dvc.repo import Repo as DvcRepo
@@ -90,20 +90,25 @@ def transform(eia_df: pd.DataFrame):
     # Create base dataframe with a timestamp for every hour in the range
     start_ts = eia_df['UTC period'].min()
     end_ts = eia_df['UTC period'].max()
-    dt_df = pd.DataFrame({'utc_ts': pd.date_range(start=start_ts, end=end_ts, freq='h')})
+    dt_df = create_timeseries_df_1h(start_ts, end_ts)
+
+    print('PRE MERGE INFO')
+    print('left df:')
+    print(df_summary(dt_df))
+    print('right df:')
+    print(df_summary(demand_df))
 
     # Merge in the demand timeseries
     merge_df = pd.merge(
         dt_df,
         demand_df[['UTC period', 'value']].rename(columns={'value': 'D'}),
-        left_on='utc_ts',
+        left_on=dt_df.index,
         right_on='UTC period',
         how='left',
     )
     merge_df = merge_df.drop(columns=['UTC period'])
+    merge_df.set_index(dt_df.index, inplace=True)
 
-    # Set timestamp as index
-    merge_df = merge_df.set_index('utc_ts', drop=False)
     print(df_summary(merge_df))
     return merge_df
 
