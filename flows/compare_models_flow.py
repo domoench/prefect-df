@@ -34,7 +34,7 @@ def fetch_eval_dataset() -> pd.DataFrame:
     return df
 
 
-@task
+@task(task_run_name="evaluate_model-{model_info.specifier.name}_v{model_info.specifier.version}")
 def evaluate_model(model_info: MLFlowModelInfo, eval_df: pd.DataFrame):
     """For the given model, evaluate it on the given evaluation set, logging
     the following to mlflow:
