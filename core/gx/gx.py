@@ -25,8 +25,8 @@ def initialize_gx():
     return gx_ctx
 
 
-# TODO rename to remove the word checkpoint
-def run_gx_checkpoint(suite_name, df):
+def gx_validate_df(suite_name, df):
+    """Validate the given dataframe against the specified expectation suite"""
     gx_ctx = get_gx_context()
 
     # Connect Data
@@ -41,10 +41,12 @@ def run_gx_checkpoint(suite_name, df):
     validation_definition = gx.ValidationDefinition(
         data=batch_definition, suite=suite, name=f'{suite_name}-val'
     )
-    results = validation_definition.run(batch_parameters={'dataframe': df})
+    results = validation_definition.run(batch_parameters={'dataframe': df.reset_index()})
     if not results['success']:
-        # TODO: Something more robust. Log event to datadog for monitoring?
+        # TODO: Something more robust.
+        # Log event to datadog for monitoring?
         # Generate data doc artifact?
+        # Throw an exception and fail?
         print(f'GX Validation failure. suite:{suite_name}')
         print(results.describe_dict())
     else:

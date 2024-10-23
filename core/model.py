@@ -21,7 +21,7 @@ DEFAULT_XGB_PARAMS = {
 
 
 @validate_call
-def get_model_features(feature_flags: ModelFeatureFlags = ModelFeatureFlags()):
+def get_model_features(feature_flags: ModelFeatureFlags = ModelFeatureFlags()) -> list:
     """Return the list of features covering the specified feature components"""
     features = TIME_FEATURES.copy()
     if feature_flags.lag:

@@ -7,7 +7,7 @@ from mlflow.entities import Run
 def validate_call(func):
     """Wrap pyantics' validate_call decorator with a version that allows
     arbitrary types"""
-    return pydantic.validate_call(func, config={'arbitrary_types_allowed': True})
+    return pydantic.validate_call(func, config={'arbitrary_types_allowed': True, 'strict': True})
 
 
 class DVCDatasetInfo(BaseModel):

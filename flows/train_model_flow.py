@@ -2,20 +2,22 @@ from prefect import flow, task, runtime
 from prefect.exceptions import ObjectNotFound
 from core.consts import EIA_TEST_SET_HOURS, EIA_MAX_D_VAL, EIA_MIN_D_VAL
 from core.data import (
-    add_time_meaning_features, add_time_lag_features, cap_column_outliers,
-    impute_null_demand_values, get_dvc_dataset_as_df, get_dvc_dataset_url,
+    add_time_meaning_features, add_time_lag_features, add_holiday_feature,
+    cap_column_outliers, impute_null_demand_values, get_dvc_dataset_as_df,
+    get_dvc_dataset_url
 )
-from core.types import DVCDatasetInfo, ModelFeatureFlags
+from core.types import DVCDatasetInfo, ModelFeatureFlags, validate_call
 from core.model import train_xgboost, get_model_features
 from core.utils import compact_ts_str, mlflow_endpoint_uri
-from core.gx.gx import run_gx_checkpoint
+from core.gx.gx import gx_validate_df
 import mlflow
 import pandas as pd
 import xgboost
 
 
 @task
-def preprocess_data(df: int):  # TODO: Check if prefect does type checking on task arguments
+@validate_call
+def preprocess_data(df: pd.DataFrame):
     """Data cleaning and feature engineering.
 
     Args:
@@ -36,7 +38,8 @@ def preprocess_data(df: int):  # TODO: Check if prefect does type checking on ta
 
 
 @task
-def clean_data(df):
+@validate_call
+def clean_data(df: pd.DataFrame):
     """Cap outliers and impute null values"""
     # Cap threshold values
     df = cap_column_outliers(df, 'D', EIA_MIN_D_VAL, EIA_MAX_D_VAL)
@@ -45,15 +48,18 @@ def clean_data(df):
 
 
 @task
-def features(df):
+@validate_call
+def features(df: pd.DataFrame):
     # Add temporal features
     df = add_time_meaning_features(df)
     df = add_time_lag_features(df)
+    df = add_holiday_feature(df)
     print(df)
     return df
 
 
 @task
+@validate_call
 def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDatasetInfo):
     """Emit relevant model training tags and params for this mlflow run.
 
@@ -77,10 +83,8 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
 
 
 @task
+@validate_call
 def train_xgb_with_tracking(train_df: pd.DataFrame, features, dvc_dataset_info: DVCDatasetInfo):
-    # Validate training data
-    run_gx_checkpoint('train', train_df)
-
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     mlflow.set_experiment('xgb.df.train')
@@ -115,6 +119,12 @@ def train_model(
 
     train_df = preprocess_data(train_df)
 
+    # Validate training data
+    gx_validate_df('train', train_df)
+
+    # Preprocessing adds all feature groups to the training data set.
+    # The feature flags determine which features the model will make use
+    # of during training.
     features = get_model_features(feature_flags)
 
     if mlflow_tracking:

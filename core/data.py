@@ -6,7 +6,8 @@ from scipy.stats import skew
 from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
 from core.types import DVCDatasetInfo
-from core.gx.gx import run_gx_checkpoint
+from core.gx.gx import gx_validate_df
+from core.holidays import is_holiday
 from prefect.blocks.system import Secret
 import numpy as np
 import pandas as pd
@@ -43,6 +44,16 @@ def add_time_lag_features(df):
     df['lag_1y'] = (df.index - pd.Timedelta('364 days')).map(ts_to_D)
     df['lag_2y'] = (df.index - pd.Timedelta('728 days')).map(ts_to_D)
     df['lag_3y'] = (df.index - pd.Timedelta('1092 days')).map(ts_to_D)
+    return df
+
+
+def add_holiday_feature(df):
+    """Add an (integer) flag specifying whether this hour falls on a US national
+    holiday"""
+    df = df.copy()
+    df['is_holiday'] = pd.Series(df.index.date, index=df.index).apply(is_holiday)
+    # Convert bool to numeric for xgboost
+    df['is_holiday'] = df['is_holiday'].astype(int)
     return df
 
 
@@ -134,7 +145,7 @@ def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
     df = pd.read_parquet(data_file_like)
 
     # Validate data pulled from DVC data warehouse
-    run_gx_checkpoint('etl', df)
+    gx_validate_df('etl', df)
 
     return df
 

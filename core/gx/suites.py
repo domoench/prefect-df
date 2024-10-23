@@ -1,4 +1,6 @@
 from core.consts import EIA_MAX_D_VAL, EIA_MIN_D_VAL, TIME_FEATURES, TARGET
+from core.model import get_model_features
+from core.types import ModelFeatureFlags
 import great_expectations as gx
 
 # Import custom expectations to ensure they are registered
@@ -42,10 +44,11 @@ def add_train_expectation_suite(gx_ctx):
     suite = gx.ExpectationSuite(name='train')
     gx_ctx.suites.add(suite)
 
+    features = get_model_features(ModelFeatureFlags(lag=True, weather=False, holidays=True))
     suite.add_expectation(
         gx.expectations.ExpectTableColumnsToMatchSet(
-            column_set=['utc_ts'] + TIME_FEATURES + [TARGET],
-            exact_match=False,
+            column_set=['utc_ts'] + features + [TARGET],
+            exact_match=True
         )
     )
 
@@ -67,6 +70,13 @@ def add_train_expectation_suite(gx_ctx):
     suite.add_expectation(
         gx.expectations.ExpectColumnValuesToBeUnique(
             column='utc_ts',
+        )
+    )
+
+    suite.add_expectation(
+        gx.expectations.ExpectColumnValuesToBeInSet(
+            column='is_holiday',
+            value_set=[0, 1],
         )
     )
 
