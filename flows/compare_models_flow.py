@@ -24,12 +24,41 @@ def fetch_eval_dataset() -> pd.DataFrame:
     # Fetch EIA data for the eval window
     end_ts = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS))
     start_ts = end_ts - pd.Timedelta(hours=EIA_TEST_SET_HOURS)
+    print(f'Fetching evaluation EIA dataset. start:{start_ts}. end:{end_ts}')
     df = get_eia_data_as_df(start_ts, end_ts)
+
+    # Fetch the same time range for each of the last 3 years, and prefix them
+    # onto the dataframe in order to generate the lag features
+    lag_dfs = []
+    for lag_y in [1, 2, 3]:
+        # TODO: Ok to be ignorant of leap years?
+        lag_start_ts = start_ts - pd.Timedelta(days=365*lag_y)
+        lag_end_ts = end_ts - pd.Timedelta(days=365*lag_y)
+        lag_df = get_eia_data_as_df(lag_start_ts, lag_end_ts)
+        lag_dfs.append(lag_df)
+    df = pd.concat([df] + lag_dfs)
 
     # Transform and feature engineer
     df = transform(df)
     df = clean_data(df)
     df = features(df)
+
+    # TODO Remove
+    # Quick and dirty runtime assertion of proper lag values
+    t = df.index.max()
+    LAG_DAYS_1Y = '364 days'
+    LAG_DAYS_2Y = '728 days'
+    LAG_DAYS_3Y = '1092 days'
+    t_lag1y = t - pd.Timedelta(LAG_DAYS_1Y)
+    t_lag2y = t - pd.Timedelta(LAG_DAYS_2Y)
+    t_lag3y = t - pd.Timedelta(LAG_DAYS_3Y)
+    assert df.loc[t, 'lag_1y'] == df.loc[t_lag1y, 'D']
+    assert df.loc[t, 'lag_2y'] == df.loc[t_lag2y, 'D']
+    assert df.loc[t, 'lag_3y'] == df.loc[t_lag3y, 'D']
+
+    # Strip off the historical/lag prefix data
+    df = df.loc[start_ts:]
+
     print(f'Eval data df:\n{df}')
     return df
 
