@@ -107,30 +107,18 @@ def add_lag_backfill_data(df: pd.DataFrame):
     df = df.copy()
     lag_dfs = []
     for (lag_start_ts, lag_end_ts) in calculate_lag_backfill_ranges(df):
-        print(f'Fetching lag data. start:{lag_start_ts}. end:{lag_end_ts}. Delta:{lag_end_ts - lag_start_ts}')
         lag_df = concurrent_fetch_EIA_data(lag_start_ts, lag_end_ts)
         lag_dfs.append(lag_df)
     # df has already had T from ETL applied, since it was fetched from the warehouse.
     # For backfill, we must apply the same transform.
     lag_df = pd.concat(lag_dfs)
-    print(f'[add_lag_backfill_data] PRE-TRANSFORM LEN: {len(lag_df)}')
     lag_df = transform(lag_df)
-    lag_df = lag_df.tz_convert(df.index.tz) # TODO does timezone matter?
-    print(f'[add_lag_backfill_data] POST-TRANSFORM LEN: {len(lag_df)}')
-
+    lag_df = lag_df.tz_convert(df.index.tz)
     concat_df = pd.concat([lag_df, df])
 
-    # TODO Remove assertions
-    assert lag_df.index.is_unique
-    assert df.index.is_unique
-    assert lag_df.index.tz == df.index.tz
-    assert concat_df.index.tz == df.index.tz
-    assert lag_df.index.max() >= df.index.min()
     # Drop duplicates at the boundaries of the backfill and original dataset
     dupe_mask = concat_df.index.duplicated(keep='first')
     concat_df = concat_df[~dupe_mask]
-    assert concat_df.index.is_unique
-    assert len(concat_df) == len(lag_df) + len(df) - 1
     return concat_df
 
 
@@ -150,25 +138,12 @@ def train_model(
         mlflow_tracking: Flag to enable/disable mlflow tracking
     """
     train_df = get_dvc_dataset_as_df(dvc_dataset_info)
-    N = len(train_df)
     start_ts = train_df.index.min()
-
-    print('PRE-BACKFILL DATAFRAME')
-    print(df_summary(train_df))
-    # N = 24529
-
     train_df = add_lag_backfill_data(train_df)
-
-    print('POST-BACKFILL DATAFRAME')
-    print(df_summary(train_df))
-
     train_df = preprocess_data(train_df)
-    print('POST-PREPROCESS DATAFRAME')
-    print(df_summary(train_df))
 
     # Strip off the historical/lag prefix data
     train_df = train_df.loc[start_ts:]
-    assert len(train_df) == N - EIA_TEST_SET_HOURS  # TODO remove
 
     # Validate training data
     gx_validate_df('train', train_df)
