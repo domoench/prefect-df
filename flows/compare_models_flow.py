@@ -4,7 +4,7 @@ from pprint import pprint
 from typing import List
 from collections import defaultdict
 from flows.etl_flow import get_eia_data_as_df, transform
-from flows.train_model_flow import clean_data, features
+from flows.train_model_flow import clean_data, features, add_lag_backfill_data
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
 from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TARGET
 from core.model import model_features_str
@@ -12,11 +12,6 @@ from core.utils import mlflow_model_uri, parse_compact_ts_str, mlflow_endpoint_u
 import matplotlib.pyplot as plt
 import pandas as pd
 import mlflow
-
-"""TODO
-    [ ] Parallel fetch and eval of models?
-    [ ] Determine which performance metric to use
-"""
 
 
 @task
@@ -27,34 +22,13 @@ def fetch_eval_dataset() -> pd.DataFrame:
     print(f'Fetching evaluation EIA dataset. start:{start_ts}. end:{end_ts}')
     df = get_eia_data_as_df(start_ts, end_ts)
 
-    # Fetch the same time range for each of the last 3 years, and prefix them
-    # onto the dataframe in order to generate the lag features
-    lag_dfs = []
-    for lag_y in [1, 2, 3]:
-        # TODO: Ok to be ignorant of leap years?
-        lag_start_ts = start_ts - pd.Timedelta(days=365*lag_y)
-        lag_end_ts = end_ts - pd.Timedelta(days=365*lag_y)
-        lag_df = get_eia_data_as_df(lag_start_ts, lag_end_ts)
-        lag_dfs.append(lag_df)
-    df = pd.concat([df] + lag_dfs)
+    # Prefix historical data in order to fill in lag column values
+    df = add_lag_backfill_data(df)
 
     # Transform and feature engineer
     df = transform(df)
     df = clean_data(df)
     df = features(df)
-
-    # TODO Remove
-    # Quick and dirty runtime assertion of proper lag values
-    t = df.index.max()
-    LAG_DAYS_1Y = '364 days'
-    LAG_DAYS_2Y = '728 days'
-    LAG_DAYS_3Y = '1092 days'
-    t_lag1y = t - pd.Timedelta(LAG_DAYS_1Y)
-    t_lag2y = t - pd.Timedelta(LAG_DAYS_2Y)
-    t_lag3y = t - pd.Timedelta(LAG_DAYS_3Y)
-    assert df.loc[t, 'lag_1y'] == df.loc[t_lag1y, 'D']
-    assert df.loc[t, 'lag_2y'] == df.loc[t_lag2y, 'D']
-    assert df.loc[t, 'lag_3y'] == df.loc[t_lag3y, 'D']
 
     # Strip off the historical/lag prefix data
     df = df.loc[start_ts:]

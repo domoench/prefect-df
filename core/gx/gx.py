@@ -39,7 +39,7 @@ def gx_validate_df(suite_name, df):
     # Create Validation Definition
     suite = gx_ctx.suites.get(name=suite_name)
     validation_definition = gx.ValidationDefinition(
-        data=batch_definition, suite=suite, name=f'{suite_name}-val'
+        data=batch_definition, suite=suite, name=f'{suite_name}-val-{timestamp}'
     )
     results = validation_definition.run(batch_parameters={'dataframe': df.reset_index()})
     if not results['success']:

@@ -1,14 +1,15 @@
 from prefect import flow, task, runtime
 from prefect.exceptions import ObjectNotFound
+from flows.etl_flow import concurrent_fetch_EIA_data, transform
 from core.consts import EIA_TEST_SET_HOURS, EIA_MAX_D_VAL, EIA_MIN_D_VAL
 from core.data import (
     add_time_meaning_features, add_time_lag_features, add_holiday_feature,
-    cap_column_outliers, impute_null_demand_values, get_dvc_dataset_as_df,
-    get_dvc_dataset_url
+    calculate_lag_backfill_ranges, cap_column_outliers,
+    impute_null_demand_values, get_dvc_dataset_as_df, get_dvc_dataset_url
 )
 from core.types import DVCDatasetInfo, ModelFeatureFlags, validate_call
 from core.model import train_xgboost, get_model_features
-from core.utils import compact_ts_str, mlflow_endpoint_uri
+from core.utils import compact_ts_str, mlflow_endpoint_uri, df_summary
 from core.gx.gx import gx_validate_df
 import mlflow
 import pandas as pd
@@ -99,7 +100,40 @@ def train_xgb_with_tracking(train_df: pd.DataFrame, features, dvc_dataset_info: 
     return reg
 
 
-# TODO: parameterize hyperparam tuning option. Use pydantic?
+@task
+def add_lag_backfill_data(df: pd.DataFrame):
+    """For the given datetime-indexed dataframe, fetch the same date range for
+    the past 3 years, and return a dataframe with those rows prefixed. """
+    df = df.copy()
+    lag_dfs = []
+    for (lag_start_ts, lag_end_ts) in calculate_lag_backfill_ranges(df):
+        print(f'Fetching lag data. start:{lag_start_ts}. end:{lag_end_ts}. Delta:{lag_end_ts - lag_start_ts}')
+        lag_df = concurrent_fetch_EIA_data(lag_start_ts, lag_end_ts)
+        lag_dfs.append(lag_df)
+    # df has already had T from ETL applied, since it was fetched from the warehouse.
+    # For backfill, we must apply the same transform.
+    lag_df = pd.concat(lag_dfs)
+    print(f'[add_lag_backfill_data] PRE-TRANSFORM LEN: {len(lag_df)}')
+    lag_df = transform(lag_df)
+    lag_df = lag_df.tz_convert(df.index.tz) # TODO does timezone matter?
+    print(f'[add_lag_backfill_data] POST-TRANSFORM LEN: {len(lag_df)}')
+
+    concat_df = pd.concat([lag_df, df])
+
+    # TODO Remove assertions
+    assert lag_df.index.is_unique
+    assert df.index.is_unique
+    assert lag_df.index.tz == df.index.tz
+    assert concat_df.index.tz == df.index.tz
+    assert lag_df.index.max() >= df.index.min()
+    # Drop duplicates at the boundaries of the backfill and original dataset
+    dupe_mask = concat_df.index.duplicated(keep='first')
+    concat_df = concat_df[~dupe_mask]
+    assert concat_df.index.is_unique
+    assert len(concat_df) == len(lag_df) + len(df) - 1
+    return concat_df
+
+
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
 def train_model(
@@ -116,8 +150,25 @@ def train_model(
         mlflow_tracking: Flag to enable/disable mlflow tracking
     """
     train_df = get_dvc_dataset_as_df(dvc_dataset_info)
+    N = len(train_df)
+    start_ts = train_df.index.min()
+
+    print('PRE-BACKFILL DATAFRAME')
+    print(df_summary(train_df))
+    # N = 24529
+
+    train_df = add_lag_backfill_data(train_df)
+
+    print('POST-BACKFILL DATAFRAME')
+    print(df_summary(train_df))
 
     train_df = preprocess_data(train_df)
+    print('POST-PREPROCESS DATAFRAME')
+    print(df_summary(train_df))
+
+    # Strip off the historical/lag prefix data
+    train_df = train_df.loc[start_ts:]
+    assert len(train_df) == N - EIA_TEST_SET_HOURS  # TODO remove
 
     # Validate training data
     gx_validate_df('train', train_df)

@@ -2,7 +2,7 @@ from prefect import flow, task
 from prefect.tasks import task_input_hash
 from core.consts import EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
 from core.data import request_EIA_data, get_dvc_remote_repo_url
-from core.types import DVCDatasetInfo
+from core.types import DVCDatasetInfo, validate_call
 from core.utils import (
     obj_key_with_timestamps, ensure_empty_dir, df_summary,
     compact_ts_str, utcnow_minus_buffer_ts, create_timeseries_df_1h
@@ -14,15 +14,17 @@ import os
 import pandas as pd
 
 
-@task
-def get_eia_data_as_df(start_ts, end_ts, offset=0, length=EIA_MAX_REQUEST_ROWS):
+@task()
+@validate_call
+def get_eia_data_as_df(start_ts: datetime, end_ts: datetime, offset=0, length=EIA_MAX_REQUEST_ROWS):
     r = request_EIA_data(start_ts, end_ts, offset, length)
     df = pd.DataFrame(r.json()['response']['data'])
     return df
 
 
 @task(cache_key_fn=task_input_hash, refresh_cache=(os.getenv('DF_ENVIRONMENT') == 'dev'))
-def concurrent_fetch_EIA_data(start_ts, end_ts):
+@validate_call
+def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime):
     time_span = end_ts - start_ts
     hours = int(time_span.total_seconds() / 3600)
 
@@ -60,8 +62,12 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
 
 
 @task
+@validate_call
 def extract(start_ts: datetime, end_ts: datetime):
     print('Fetching EIA electricty demand timeseries.')
+
+    # TODO: EIA no longer serves data from before 2019. We could used the saved
+    # DVC data for values between 2015 and 2019
 
     # Calculate the number of rows to fetch from the API between start and end
     eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
@@ -72,6 +78,7 @@ def extract(start_ts: datetime, end_ts: datetime):
 
 @task
 def transform(eia_df: pd.DataFrame):
+    """Convert types, drop duplicates, add D column, ensure every hour."""
     print('Transforming timeseries.')
 
     # Convert types
@@ -91,12 +98,6 @@ def transform(eia_df: pd.DataFrame):
     start_ts = eia_df['UTC period'].min()
     end_ts = eia_df['UTC period'].max()
     dt_df = create_timeseries_df_1h(start_ts, end_ts)
-
-    print('PRE MERGE INFO')
-    print('left df:')
-    print(df_summary(dt_df))
-    print('right df:')
-    print(df_summary(demand_df))
 
     # Merge in the demand timeseries
     merge_df = pd.merge(

@@ -1,4 +1,6 @@
-from core.data import add_time_lag_features, add_holiday_feature
+from core.data import (
+    add_time_lag_features, add_holiday_feature, calculate_lag_backfill_ranges
+)
 from core.utils import create_timeseries_df_1h
 from core.consts import LAG_FEATURES
 import pandas as pd
@@ -70,3 +72,41 @@ class TestData:
         # 34d 24 hours are 12/26
         assert (df.iloc[48:]['is_holiday'] == 0).all()
         assert isinstance(df['is_holiday'].iloc[0], np.int64)
+
+    def test_calculate_lag_backfill_ranges_lt_1y(self, timeseries_df):
+        # CASE I: Time range is less than 1 year => No overlap of lag ranges
+        end_ts = pd.Timestamp.utcnow().round('h')
+        start_ts = end_ts - pd.Timedelta(f'{4*7} days')
+        df = timeseries_df(start_ts, end_ts)
+        ranges = calculate_lag_backfill_ranges(df)
+        lag_3y_range, lag_2y_range, lag_1y_range = ranges
+        assert lag_1y_range[1] - lag_1y_range[0] == end_ts - start_ts
+        assert lag_2y_range[1] - lag_2y_range[0] == end_ts - start_ts
+        assert lag_3y_range[1] - lag_3y_range[0] == end_ts - start_ts
+        assert lag_1y_range[0] == start_ts - pd.Timedelta('364 days')
+        assert lag_2y_range[0] == start_ts - pd.Timedelta('728 days')
+        assert lag_3y_range[0] == start_ts - pd.Timedelta('1092 days')
+        assert lag_1y_range[1] == end_ts - pd.Timedelta('364 days')
+        assert lag_2y_range[1] == end_ts - pd.Timedelta('728 days')
+        assert lag_3y_range[1] == end_ts - pd.Timedelta('1092 days')
+        # Confirm that day of week is maintained for lagged dates
+        assert lag_1y_range[0].dayofweek == (start_ts - pd.Timedelta('364 days')).dayofweek
+        assert lag_2y_range[0].dayofweek == (start_ts - pd.Timedelta('728 days')).dayofweek
+        assert lag_3y_range[0].dayofweek == (start_ts - pd.Timedelta('1092 days')).dayofweek
+        assert lag_1y_range[1].dayofweek == (end_ts - pd.Timedelta('364 days')).dayofweek
+        assert lag_2y_range[1].dayofweek == (end_ts - pd.Timedelta('728 days')).dayofweek
+        assert lag_3y_range[1].dayofweek == (end_ts - pd.Timedelta('1092 days')).dayofweek
+
+    def test_calculate_lag_backfill_ranges_gt_1y(self, timeseries_df):
+        # Time range is greater than 1 year => No overlap of lag ranges
+        df = timeseries_df()
+        start_ts = df.index.min()
+        ranges = calculate_lag_backfill_ranges(df)
+        # Only 1 backfill range, because 3 years of backfill is 1 contiguous range
+        # in this case.
+        assert len(ranges) == 1
+        lag_range = ranges[0]
+        # Start of backfill is 3 years before start of data range
+        assert lag_range[0] == start_ts - pd.Timedelta('1092 days')
+        # End of backfill is the start of the data range
+        assert lag_range[1] == start_ts

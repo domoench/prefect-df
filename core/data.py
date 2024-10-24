@@ -5,10 +5,12 @@ Module containing logic for getting and persisting data, and feature engineering
 from scipy.stats import skew
 from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
-from core.types import DVCDatasetInfo
+from core.types import DVCDatasetInfo, validate_call
 from core.gx.gx import gx_validate_df
 from core.holidays import is_holiday
+from core.utils import merge_intervals
 from prefect.blocks.system import Secret
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import dvc.api
@@ -45,6 +47,23 @@ def add_time_lag_features(df):
     df['lag_2y'] = (df.index - pd.Timedelta('728 days')).map(ts_to_D)
     df['lag_3y'] = (df.index - pd.Timedelta('1092 days')).map(ts_to_D)
     return df
+
+
+def calculate_lag_backfill_ranges(df):
+    """For the given datetime-indexed dataframe, return a list of (start_ts, end_ts)
+    range tuples defining the same date range for each of the past 3 years"""
+    start_ts, end_ts = df.index.min(), df.index.max()
+    ranges = []
+    for lag_y in [3, 2, 1]:
+        # TODO: Ok to be ignorant of leap years like this?
+        lag_start_ts = start_ts - pd.Timedelta(days=364*lag_y)
+        lag_end_ts = end_ts - pd.Timedelta(days=364*lag_y)
+        # No point in allowing lag end to overlap with original data range
+        lag_end_ts = min(start_ts, lag_end_ts)
+        ranges.append((lag_start_ts, lag_end_ts))
+    # When df's time range spans more than a year, the lags ranges will overlap.
+    ranges = merge_intervals(ranges)
+    return ranges
 
 
 def add_holiday_feature(df):
@@ -94,7 +113,8 @@ def impute_null_demand_values(df):
     return df
 
 
-def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
+@validate_call
+def request_EIA_data(start_ts: datetime, end_ts: datetime, offset, length=EIA_MAX_REQUEST_ROWS):
     print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
