@@ -9,7 +9,7 @@ import os
 import pickle
 import pandas as pd
 import shutil
-from core.types import MLFlowModelSpecifier
+from core.types import MLFlowModelSpecifier, validate_call
 from core.consts import EIA_BUFFER_HOURS
 
 
@@ -73,10 +73,18 @@ def df_summary(df) -> str:
            f'Dataframe summary:\n{df}\n'
 
 
-def create_timeseries_df_1h(start_ts, end_ts):
+@validate_call
+def create_timeseries_df_1h(start_ts, end_ts) -> pd.DataFrame:
     df = pd.DataFrame({'utc_ts': pd.date_range(start=start_ts, end=end_ts, freq='h')})
     df = df.set_index('utc_ts')
     return df
+
+
+def remove_rows_with_duplicate_indices(df: pd.DataFrame):
+    """Where there are rows with duplicate timestamps, remove all but the
+    first."""
+    dupe_mask = df.index.duplicated(keep='first')
+    return df[~dupe_mask]
 
 
 """

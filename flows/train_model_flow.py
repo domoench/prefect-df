@@ -9,7 +9,9 @@ from core.data import (
 )
 from core.types import DVCDatasetInfo, ModelFeatureFlags, validate_call
 from core.model import train_xgboost, get_model_features
-from core.utils import compact_ts_str, mlflow_endpoint_uri, df_summary
+from core.utils import (
+    compact_ts_str, mlflow_endpoint_uri, remove_rows_with_duplicate_indices
+)
 from core.gx.gx import gx_validate_df
 import mlflow
 import pandas as pd
@@ -117,8 +119,7 @@ def add_lag_backfill_data(df: pd.DataFrame):
     concat_df = pd.concat([lag_df, df])
 
     # Drop duplicates at the boundaries of the backfill and original dataset
-    dupe_mask = concat_df.index.duplicated(keep='first')
-    concat_df = concat_df[~dupe_mask]
+    concat_df = remove_rows_with_duplicate_indices(concat_df)
     return concat_df
 
 

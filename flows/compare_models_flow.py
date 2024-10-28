@@ -160,7 +160,7 @@ def generate_performance_comparison_plot(plot_models: List[MLFlowModelSpecifier]
 @flow(log_prints=True)
 def compare_models(
     eval_models: List[MLFlowModelSpecifier],
-    plot_models: List[MLFlowModelSpecifier],
+    plot_models: List[MLFlowModelSpecifier] | None,
 ):
     """Evaluate and log performance metrics for the given eval_models. Then
     generate a plot comparing historical perfomance of specified
@@ -171,7 +171,11 @@ def compare_models(
             evaluate.
         plot_models: A list of model specifiers, designating which model
             performance metric series to include in the comparison plot.
+            If None, it will be set to the same list as eval_models.
     """
+    if plot_models is None:
+        plot_models = eval_models
+
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     client = MlflowClient()
 
