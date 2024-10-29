@@ -2,10 +2,11 @@ from prefect import flow, task
 from prefect.tasks import task_input_hash
 from core.consts import EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
 from core.data import request_EIA_data, get_dvc_remote_repo_url
-from core.types import DVCDatasetInfo
+from core.types import DVCDatasetInfo, validate_call
 from core.utils import (
     obj_key_with_timestamps, ensure_empty_dir, df_summary,
-    compact_ts_str, utcnow_minus_buffer_ts
+    compact_ts_str, utcnow_minus_buffer_ts, create_timeseries_df_1h,
+    remove_rows_with_duplicate_indices
 )
 from datetime import datetime
 from dvc.repo import Repo as DvcRepo
@@ -15,18 +16,31 @@ import pandas as pd
 
 
 @task
-def get_eia_data_as_df(start_ts, end_ts, offset=0, length=EIA_MAX_REQUEST_ROWS):
+@validate_call
+def get_eia_data_as_df(
+    start_ts: datetime, end_ts: datetime, offset=0, length=EIA_MAX_REQUEST_ROWS
+) -> pd.DataFrame:
+    """Fetch EIA power demand data for the given time range and API page offset.
+    Return a dataframe with a datetime index."""
     r = request_EIA_data(start_ts, end_ts, offset, length)
     df = pd.DataFrame(r.json()['response']['data'])
+    # Immediately cast timestamps to proper datetime type, as the result of this
+    # fetch is used in multiple contexts - all of which assume pandas datetime object
+    # format.
+    df['utc_ts'] = pd.to_datetime(df['period'], utc=True)
+    df = df.set_index('utc_ts')
+    df = df.drop(columns='period')
     return df
 
 
 @task(cache_key_fn=task_input_hash, refresh_cache=(os.getenv('DF_ENVIRONMENT') == 'dev'))
-def concurrent_fetch_EIA_data(start_ts, end_ts):
+@validate_call
+def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFrame:
     time_span = end_ts - start_ts
     hours = int(time_span.total_seconds() / 3600)
 
-    # Query EIA to determine exactly how many records match our time range
+    # Metadata Query: determine exactly how many EIA records exist that match
+    # our time range
     r = request_EIA_data(start_ts, end_ts, 0)
     num_total_records = int(r.json()['response']['total'])
     print(f'Total records to fetch: {num_total_records}')
@@ -60,8 +74,12 @@ def concurrent_fetch_EIA_data(start_ts, end_ts):
 
 
 @task
-def extract(start_ts: datetime, end_ts: datetime):
+@validate_call
+def extract(start_ts: datetime, end_ts: datetime) -> pd.DataFrame:
     print('Fetching EIA electricty demand timeseries.')
+
+    # TODO: EIA no longer serves data from before 2019. We could used the saved
+    # DVC data for values between 2015 and 2019
 
     # Calculate the number of rows to fetch from the API between start and end
     eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
@@ -71,39 +89,37 @@ def extract(start_ts: datetime, end_ts: datetime):
 
 
 @task
+@validate_call
 def transform(eia_df: pd.DataFrame):
+    """Convert types, drop duplicates, add D column, ensure every hour."""
     print('Transforming timeseries.')
 
     # Convert types
-    eia_df['UTC period'] = pd.to_datetime(eia_df['period'], utc=True)
     eia_df['value'] = pd.to_numeric(eia_df['value'])
 
-    # Careful, EIA results can have duplicates (at the boundaries of the pages)
+    # EIA results can have duplicates (at the boundaries of the pages)
     # And such behavior seems to be non-deterministic.
-    # Remove duplicates
-    eia_df = eia_df.drop_duplicates(subset=['UTC period', 'value', 'type'])
+    # Remove those duplicates
+    eia_df = remove_rows_with_duplicate_indices(eia_df)
 
     # In the EIA API response, for any given hour, there are between 0 and 1 records:
     # 1 record for D value, or 0 if EIA has no D record. Units are MWh.
     demand_df = eia_df[eia_df.type == 'D']
 
     # Create base dataframe with a timestamp for every hour in the range
-    start_ts = eia_df['UTC period'].min()
-    end_ts = eia_df['UTC period'].max()
-    dt_df = pd.DataFrame({'utc_ts': pd.date_range(start=start_ts, end=end_ts, freq='h')})
+    start_ts = eia_df.index.min()
+    end_ts = eia_df.index.max()
+    dt_df = create_timeseries_df_1h(start_ts, end_ts)
 
     # Merge in the demand timeseries
     merge_df = pd.merge(
         dt_df,
-        demand_df[['UTC period', 'value']].rename(columns={'value': 'D'}),
-        left_on='utc_ts',
-        right_on='UTC period',
+        demand_df[['value']].rename(columns={'value': 'D'}),
+        left_index=True,
+        right_index=True,
         how='left',
     )
-    merge_df = merge_df.drop(columns=['UTC period'])
 
-    # Set timestamp as index
-    merge_df = merge_df.set_index('utc_ts', drop=False)
     print(df_summary(merge_df))
     return merge_df
 

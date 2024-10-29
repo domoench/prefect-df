@@ -9,7 +9,7 @@ import os
 import pickle
 import pandas as pd
 import shutil
-from core.types import MLFlowModelSpecifier
+from core.types import MLFlowModelSpecifier, validate_call
 from core.consts import EIA_BUFFER_HOURS
 
 
@@ -71,6 +71,20 @@ def df_summary(df) -> str:
     df.info(buf=buffer)
     return f'Dataframe info:\n{buffer.getvalue()}\n' \
            f'Dataframe summary:\n{df}\n'
+
+
+@validate_call
+def create_timeseries_df_1h(start_ts, end_ts) -> pd.DataFrame:
+    df = pd.DataFrame({'utc_ts': pd.date_range(start=start_ts, end=end_ts, freq='h')})
+    df = df.set_index('utc_ts')
+    return df
+
+
+def remove_rows_with_duplicate_indices(df: pd.DataFrame):
+    """Where there are rows with duplicate timestamps, remove all but the
+    first."""
+    dupe_mask = df.index.duplicated(keep='first')
+    return df[~dupe_mask]
 
 
 """
@@ -139,3 +153,31 @@ def ensure_empty_dir(dir_path):
                 os.unlink(file_path)
             elif os.path.isdir(file_path):
                 shutil.rmtree(file_path)
+
+
+"""
+General
+"""
+
+
+def merge_intervals(intervals):
+    """Standard iterative interval merge algorithm"""
+    # Sort intervals by their start
+    intervals = sorted(intervals, key=lambda x: x[0])
+
+    merged = []
+    curr_s, curr_e = intervals[0]
+
+    for next_s, next_e in intervals[1:]:
+        # CASE I: Current overlaps with next
+        if curr_e >= next_s:
+            # Merge the intevals: Extend the current for next iteration
+            curr_e = max(curr_e, next_e)
+        # CASE II: Current does not overlap with next
+        else:
+            merged.append((curr_s, curr_e))
+            curr_s, curr_e = next_s, next_e
+    # Finally append the current interval
+    merged.append((curr_s, curr_e))
+
+    return merged

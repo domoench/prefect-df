@@ -5,9 +5,12 @@ Module containing logic for getting and persisting data, and feature engineering
 from scipy.stats import skew
 from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
-from core.types import DVCDatasetInfo
-from core.gx.gx import run_gx_checkpoint
+from core.types import DVCDatasetInfo, validate_call
+from core.gx.gx import gx_validate_df
+from core.holidays import is_holiday
+from core.utils import merge_intervals
 from prefect.blocks.system import Secret
+from datetime import datetime
 import numpy as np
 import pandas as pd
 import dvc.api
@@ -16,9 +19,9 @@ import os
 import requests
 
 
-def add_temporal_features(df):
-    """Given a DataFrame with a datetime index, return a copy with
-    added temporal feature columns."""
+def add_time_meaning_features(df):
+    """Given a DataFrame with a datetime index, return a copy with added
+    context on the meaning of a timestamp - e.g. month, day of week etc."""
     df = df.copy()
     df['hour'] = df.index.hour
     df['month'] = df.index.month
@@ -27,6 +30,49 @@ def add_temporal_features(df):
     df['dayofweek'] = df.index.dayofweek
     df['dayofmonth'] = df.index.day
     df['dayofyear'] = df.index.dayofyear
+    return df
+
+
+def add_time_lag_features(df):
+    """Add lag timeseries features to the given dataframe based on its index.
+
+    Note: This produces many NaN values in the lag columns. For example, you can't
+    add lagged values to the oldest timestamp.
+    TODO: Does xgboost do ok with these null values? I assume so, but confirm.
+    """
+    df = df.copy()
+    ts_to_D = df.D.to_dict()
+    # Trick: Offset by 364 days => lagged day is same day of week
+    df['lag_1y'] = (df.index - pd.Timedelta('364 days')).map(ts_to_D)
+    df['lag_2y'] = (df.index - pd.Timedelta('728 days')).map(ts_to_D)
+    df['lag_3y'] = (df.index - pd.Timedelta('1092 days')).map(ts_to_D)
+    return df
+
+
+def calculate_lag_backfill_ranges(df):
+    """For the given datetime-indexed dataframe, return a list of (start_ts, end_ts)
+    range tuples defining the same date range for each of the past 3 years"""
+    start_ts, end_ts = df.index.min(), df.index.max()
+    ranges = []
+    for lag_y in [3, 2, 1]:
+        # TODO: Ok to be ignorant of leap years like this?
+        lag_start_ts = start_ts - pd.Timedelta(days=364*lag_y)
+        lag_end_ts = end_ts - pd.Timedelta(days=364*lag_y)
+        # No point in allowing lag end to overlap with original data range
+        lag_end_ts = min(start_ts, lag_end_ts)
+        ranges.append((lag_start_ts, lag_end_ts))
+    # When df's time range spans more than a year, the lags ranges will overlap.
+    ranges = merge_intervals(ranges)
+    return ranges
+
+
+def add_holiday_feature(df):
+    """Add an (integer) flag specifying whether this hour falls on a US national
+    holiday"""
+    df = df.copy()
+    df['is_holiday'] = pd.Series(df.index.date, index=df.index).apply(is_holiday)
+    # Convert bool to numeric for xgboost
+    df['is_holiday'] = df['is_holiday'].astype(int)
     return df
 
 
@@ -67,7 +113,8 @@ def impute_null_demand_values(df):
     return df
 
 
-def request_EIA_data(start_ts, end_ts, offset, length=EIA_MAX_REQUEST_ROWS):
+@validate_call
+def request_EIA_data(start_ts: datetime, end_ts: datetime, offset, length=EIA_MAX_REQUEST_ROWS):
     print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
@@ -118,7 +165,7 @@ def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
     df = pd.read_parquet(data_file_like)
 
     # Validate data pulled from DVC data warehouse
-    run_gx_checkpoint('etl', df)
+    gx_validate_df('etl', df)
 
     return df
 

@@ -1,20 +1,33 @@
 from prefect import flow, task, runtime
 from prefect.exceptions import ObjectNotFound
+from flows.etl_flow import concurrent_fetch_EIA_data, transform
 from core.consts import EIA_TEST_SET_HOURS, EIA_MAX_D_VAL, EIA_MIN_D_VAL
 from core.data import (
-    add_temporal_features, cap_column_outliers, impute_null_demand_values,
-    get_dvc_dataset_as_df, get_dvc_dataset_url,
+    add_time_meaning_features, add_time_lag_features, add_holiday_feature,
+    calculate_lag_backfill_ranges, cap_column_outliers,
+    impute_null_demand_values, get_dvc_dataset_as_df, get_dvc_dataset_url
 )
-from core.types import DVCDatasetInfo
-from core.model import train_xgboost
-from core.utils import compact_ts_str, mlflow_endpoint_uri
-from core.gx.gx import run_gx_checkpoint
+from core.types import DVCDatasetInfo, ModelFeatureFlags, validate_call
+from core.model import train_xgboost, get_model_features
+from core.utils import (
+    compact_ts_str, mlflow_endpoint_uri, remove_rows_with_duplicate_indices
+)
+from core.gx.gx import gx_validate_df
 import mlflow
 import pandas as pd
+import xgboost
 
 
 @task
-def preprocess_data(df):
+@validate_call
+def preprocess_data(df: pd.DataFrame):
+    """Data cleaning and feature engineering.
+
+    Args:
+        df: The full length (train + test time window) raw data set from the warehouse
+    Returns:
+        df: Training dataset (test set removed)
+    """
     # Feature Engineering
     df = clean_data(df)
     df = features(df)
@@ -22,13 +35,14 @@ def preprocess_data(df):
     # Remove a TEST_SET_SIZE window at the end, so that after cross validation
     # and refit, the final training set excludes that window for use by adhoc model
     # evaluation on the most recent TEST_SET_SIZE hours.
-    # TODO add expectation that rows are sorted by time
+    # TODO Write test to confirm test set is stripped of the end
     df = df[:-EIA_TEST_SET_HOURS]
     return df
 
 
 @task
-def clean_data(df):
+@validate_call
+def clean_data(df: pd.DataFrame):
     """Cap outliers and impute null values"""
     # Cap threshold values
     df = cap_column_outliers(df, 'D', EIA_MIN_D_VAL, EIA_MAX_D_VAL)
@@ -37,14 +51,18 @@ def clean_data(df):
 
 
 @task
-def features(df):
+@validate_call
+def features(df: pd.DataFrame):
     # Add temporal features
-    df = add_temporal_features(df)
+    df = add_time_meaning_features(df)
+    df = add_time_lag_features(df)
+    df = add_holiday_feature(df)
     print(df)
     return df
 
 
 @task
+@validate_call
 def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDatasetInfo):
     """Emit relevant model training tags and params for this mlflow run.
 
@@ -68,34 +86,75 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
 
 
 @task
-def train_xgb_with_tracking(train_df: pd.DataFrame, dvc_dataset_info: DVCDatasetInfo):
-    # Validate training data
-    run_gx_checkpoint('train', train_df)
-
+@validate_call
+def train_xgb_with_tracking(train_df: pd.DataFrame, features, dvc_dataset_info: DVCDatasetInfo):
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     mlflow.set_experiment('xgb.df.train')
+    reg = None
     with mlflow.start_run():
         mlflow_emit_tags_and_params(train_df, dvc_dataset_info)
 
         # Cross validation training
         # TODO: Parameterize Optional Hyper param tuning
         mlflow.xgboost.autolog()
-        train_xgboost(train_df, hyperparam_tuning=False)
+        reg = train_xgboost(train_df, features, hyperparam_tuning=False)
+    return reg
 
 
-# TODO: parameterize hyperparam tuning option. Use pydantic?
+@task
+def add_lag_backfill_data(df: pd.DataFrame):
+    """For the given datetime-indexed dataframe, fetch the same date range for
+    the past 3 years, and return a dataframe with those rows prefixed. """
+    df = df.copy()
+    lag_dfs = []
+    for (lag_start_ts, lag_end_ts) in calculate_lag_backfill_ranges(df):
+        lag_df = concurrent_fetch_EIA_data(lag_start_ts, lag_end_ts)
+        lag_dfs.append(lag_df)
+    # df has already had T from ETL applied, since it was fetched from the warehouse.
+    # For backfill, we must apply the same transform.
+    lag_df = pd.concat(lag_dfs)
+    lag_df = transform(lag_df)
+    lag_df = lag_df.tz_convert(df.index.tz)
+    concat_df = pd.concat([lag_df, df])
+
+    # Drop duplicates at the boundaries of the backfill and original dataset
+    concat_df = remove_rows_with_duplicate_indices(concat_df)
+    return concat_df
+
+
 # https://docs.prefect.io/latest/concepts/flows/#parameters
 @flow
-def train_model(dvc_dataset_info: DVCDatasetInfo, log_prints=True):
+def train_model(
+    dvc_dataset_info: DVCDatasetInfo,
+    mlflow_tracking: bool = True,
+    feature_flags: ModelFeatureFlags = ModelFeatureFlags(),
+    log_prints=True
+) -> xgboost.sklearn.XGBRegressor:
     """Train an XGBoost timeseries forecasting model
 
     Args:
         dvc_dataset_info: Describes which full dataset to pull from DVC. This timeseries
             dataset time span will cover the contiguous training and test set windows.
+        mlflow_tracking: Flag to enable/disable mlflow tracking
     """
     train_df = get_dvc_dataset_as_df(dvc_dataset_info)
-
+    start_ts = train_df.index.min()
+    train_df = add_lag_backfill_data(train_df)
     train_df = preprocess_data(train_df)
 
-    train_xgb_with_tracking(train_df, dvc_dataset_info)
+    # Strip off the historical/lag prefix data
+    train_df = train_df.loc[start_ts:]
+
+    # Validate training data
+    gx_validate_df('train', train_df)
+
+    # Preprocessing adds all feature groups to the training data set.
+    # The feature flags determine which features the model will make use
+    # of during training.
+    features = get_model_features(feature_flags)
+
+    if mlflow_tracking:
+        return train_xgb_with_tracking(train_df, features, dvc_dataset_info)
+    else:
+        return train_xgboost(train_df, features, hyperparam_tuning=False)
