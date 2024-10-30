@@ -1,5 +1,6 @@
 from core.data import (
-    add_time_lag_features, add_holiday_feature, calculate_lag_backfill_ranges
+    add_time_lag_features, add_holiday_feature, calculate_lag_backfill_ranges,
+    calculate_chunk_index
 )
 from core.utils import create_timeseries_df_1h
 from core.consts import LAG_FEATURES
@@ -110,3 +111,33 @@ class TestData:
         assert lag_range[0] == start_ts - pd.Timedelta('1092 days')
         # End of backfill is the start of the data range
         assert lag_range[1] == start_ts
+
+    def test_calculate_chunk_index(self):
+        start_ts = pd.Timestamp('2023-12-24 05:00:00+00:00')
+        end_ts = pd.Timestamp('2024-10-29 20:00:00+00:00')
+        chunk_idx_df = calculate_chunk_index(start_ts, end_ts)
+        assert len(chunk_idx_df) == 5
+        assert chunk_idx_df.iloc[0].to_dict() == {
+            'year': 2023,
+            'quarter': 4,
+            'start_ts': pd.Timestamp('2023-10-01 00:00:00+00:00'),  # start-inclusive
+            'end_ts': pd.Timestamp('2023-12-31 23:00:00+00:00'),  # end-exlusive
+            'name': '2023_Q4_from_2023-10-01-00_to_2023-12-31-23',
+            'complete': False
+        }
+        assert chunk_idx_df.iloc[1].to_dict() == {
+            'year': 2024,
+            'quarter': 1,
+            'start_ts': pd.Timestamp('2024-01-01 00:00:00+00:00'),
+            'end_ts': pd.Timestamp('2024-03-31 23:00:00+00:00'),
+            'name': '2024_Q1_from_2024-01-01-00_to_2024-03-31-23',
+            'complete': True
+        }
+        assert chunk_idx_df.iloc[4].to_dict() == {
+            'year': 2024,
+            'quarter': 4,
+            'start_ts': pd.Timestamp('2024-10-01 00:00:00+00:00'),
+            'end_ts': pd.Timestamp('2024-12-31 23:00:00+00:00'),
+            'name': '2024_Q4_from_2024-10-01-00_to_2024-12-31-23',
+            'complete': False
+        }

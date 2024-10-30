@@ -87,6 +87,22 @@ def remove_rows_with_duplicate_indices(df: pd.DataFrame):
     return df[~dupe_mask]
 
 
+def concat_time_indexed_dfs(dfs) -> pd.DataFrame:
+    """Concatenate the given list of DatetimeIndex-ed dataframes, ensuring any
+    duplicate rows (e.g. when input dataframes have overlapping time ranges)
+    are removed."""
+    concat_df = pd.concat(dfs)
+    concat_df = remove_rows_with_duplicate_indices(concat_df)
+    concat_df = concat_df.sort_index()
+    return concat_df
+
+
+def has_full_hourly_index(df: pd.DataFrame) -> bool:
+    start_ts, end_ts = df.index.min(), df.index.max()
+    expected_range = pd.date_range(start=start_ts, end=end_ts, freq='H')
+    return df.index.equals(expected_range)
+
+
 """
 Persistance
 """
@@ -142,7 +158,7 @@ def model_to_pickle_buff(model):
 
 
 def ensure_empty_dir(dir_path):
-    """Ensure the given directory exists and is empty"""
+    """Ensure the given directory exists and is empty."""
     directory = os.path.dirname(dir_path)
     if not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)

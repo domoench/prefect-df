@@ -11,6 +11,8 @@ from core.holidays import is_holiday
 from core.utils import merge_intervals
 from prefect.blocks.system import Secret
 from datetime import datetime
+from git import Repo as GitRepo
+from dvc.repo import Repo as DvcRepo
 import numpy as np
 import pandas as pd
 import dvc.api
@@ -64,6 +66,39 @@ def calculate_lag_backfill_ranges(df):
     # When df's time range spans more than a year, the lags ranges will overlap.
     ranges = merge_intervals(ranges)
     return ranges
+
+
+def calculate_chunk_index(start_ts: datetime, end_ts: datetime) -> pd.DataFrame:
+    """Index the given interval by standard calendar (not fiscal) quarter
+    chunks/intervals. Each chunk in the index has a boolean flag to specify whether
+    it is complete (has data for every hour) or not."""
+    q_start = pd.Timestamp(start_ts).to_period('Q').start_time.tz_localize('UTC')
+    q_end = pd.Timestamp(end_ts).to_period('Q').end_time.tz_localize('UTC')
+
+    first_chunk_complete = start_ts == q_start
+    last_chunk_complete = end_ts == q_end
+
+    chunks = []
+    chunk_start = q_start
+    while chunk_start < q_end:
+        chunk_end = chunk_start + pd.offsets.QuarterBegin(startingMonth=1) - pd.Timedelta(hours=1)
+        chunk_name = f'{chunk_start.year}_Q{chunk_start.quarter}' \
+                     f"_from_{chunk_start.strftime('%Y-%m-%d-%H')}" \
+                     f"_to_{chunk_end.strftime('%Y-%m-%d-%H')}"
+        chunks.append({
+            'year': chunk_start.year,
+            'quarter': chunk_start.quarter,
+            'start_ts': chunk_start,
+            'end_ts': chunk_end,
+            'name': chunk_name,
+            'complete': True  # Dummy value
+            })
+        chunk_start += pd.offsets.QuarterBegin(startingMonth=1)
+
+    chunks[0]['complete'] = first_chunk_complete
+    chunks[-1]['complete'] = last_chunk_complete
+    chunk_df = pd.DataFrame(chunks)
+    return chunk_df
 
 
 def add_holiday_feature(df):
@@ -141,6 +176,30 @@ def request_EIA_data(start_ts: datetime, end_ts: datetime, offset, length=EIA_MA
 """
 DVC
 """
+
+
+def get_local_dvc_git_repo():
+    """Ensure the dvc git repo is on the local filsystem in a clean state."""
+    local_dvc_repo_path = os.getenv('DVC_LOCAL_REPO_PATH')
+    directory = os.path.dirname(local_dvc_repo_path)
+    # Create the directory and clone the repo if necessary
+    git_repo = None
+    if not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+        git_repo_url = get_dvc_remote_repo_url()
+        git_repo = GitRepo.clone_from(git_repo_url, local_dvc_repo_path)
+    else:
+        git_repo = GitRepo(local_dvc_repo_path)
+        # Ensure no unstaged changes
+        assert not git_repo.is_dirty(untracked_files=True) # TODO something better
+        print('DVC git repo is clean')
+    return git_repo
+
+
+def get_DvcRepo():
+    """Return a DvcRepo instance to interact with the local dvc repo."""
+    local_dvc_repo_path = os.getenv('DVC_LOCAL_REPO_PATH')
+    return DvcRepo(local_dvc_repo_path)
 
 
 def get_dvc_remote_repo_url(github_PAT: str = None) -> str:

@@ -10,7 +10,7 @@ from core.data import (
 from core.types import DVCDatasetInfo, ModelFeatureFlags, validate_call
 from core.model import train_xgboost, get_model_features
 from core.utils import (
-    compact_ts_str, mlflow_endpoint_uri, remove_rows_with_duplicate_indices
+    compact_ts_str, mlflow_endpoint_uri, concat_time_indexed_dfs
 )
 from core.gx.gx import gx_validate_df
 import mlflow
@@ -116,11 +116,21 @@ def add_lag_backfill_data(df: pd.DataFrame):
     lag_df = pd.concat(lag_dfs)
     lag_df = transform(lag_df)
     lag_df = lag_df.tz_convert(df.index.tz)
-    concat_df = pd.concat([lag_df, df])
 
-    # Drop duplicates at the boundaries of the backfill and original dataset
-    concat_df = remove_rows_with_duplicate_indices(concat_df)
+    # Concatenate and drop duplicates at the boundaries of the backfill and
+    # original dataset
+    concat_df = concat_time_indexed_dfs([lag_df, df])
     return concat_df
+
+
+@task
+def get_training_data():
+    # Fetch training data from DVC
+    # Backfill lag data (also from DVC)
+    # Preprocess
+    # Strip off backfill prefix AND eval suffix (move from preprocess_data)
+    # Run gx validation
+    pass  # TODO implement above
 
 
 # https://docs.prefect.io/latest/concepts/flows/#parameters
@@ -138,14 +148,13 @@ def train_model(
             dataset time span will cover the contiguous training and test set windows.
         mlflow_tracking: Flag to enable/disable mlflow tracking
     """
+    # Replace following block with get_training_data
     train_df = get_dvc_dataset_as_df(dvc_dataset_info)
     start_ts = train_df.index.min()
     train_df = add_lag_backfill_data(train_df)
     train_df = preprocess_data(train_df)
-
     # Strip off the historical/lag prefix data
     train_df = train_df.loc[start_ts:]
-
     # Validate training data
     gx_validate_df('train', train_df)
 
