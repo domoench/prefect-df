@@ -112,16 +112,19 @@ class TestData:
         # End of backfill is the start of the data range
         assert lag_range[1] == start_ts
 
-    def test_calculate_chunk_index(self):
+    def test_calculate_chunk_index(self, timeseries_df):
         start_ts = pd.Timestamp('2023-12-24 05:00:00+00:00')
         end_ts = pd.Timestamp('2024-10-29 20:00:00+00:00')
-        chunk_idx_df = calculate_chunk_index(start_ts, end_ts)
+        df = timeseries_df(start_ts, end_ts)
+        chunk_idx_df = calculate_chunk_index(df)
         assert len(chunk_idx_df) == 5
         assert chunk_idx_df.iloc[0].to_dict() == {
             'year': 2023,
             'quarter': 4,
             'start_ts': pd.Timestamp('2023-10-01 00:00:00+00:00'),  # start-inclusive
             'end_ts': pd.Timestamp('2023-12-31 23:00:00+00:00'),  # end-exlusive
+            'data_start_ts': pd.Timestamp('2023-12-24 05:00:00+00:00'),
+            'data_end_ts': pd.Timestamp('2023-12-31 23:00:00+00:00'),
             'name': '2023_Q4_from_2023-10-01-00_to_2023-12-31-23',
             'complete': False
         }
@@ -130,6 +133,8 @@ class TestData:
             'quarter': 1,
             'start_ts': pd.Timestamp('2024-01-01 00:00:00+00:00'),
             'end_ts': pd.Timestamp('2024-03-31 23:00:00+00:00'),
+            'data_start_ts': pd.Timestamp('2024-01-01 00:00:00+00:00'),
+            'data_end_ts': pd.Timestamp('2024-03-31 23:00:00+00:00'),
             'name': '2024_Q1_from_2024-01-01-00_to_2024-03-31-23',
             'complete': True
         }
@@ -138,6 +143,8 @@ class TestData:
             'quarter': 4,
             'start_ts': pd.Timestamp('2024-10-01 00:00:00+00:00'),
             'end_ts': pd.Timestamp('2024-12-31 23:00:00+00:00'),
+            'data_start_ts': pd.Timestamp('2024-10-01 00:00:00+00:00'),
+            'data_end_ts': pd.Timestamp('2024-10-29 20:00:00+00:00'),
             'name': '2024_Q4_from_2024-10-01-00_to_2024-12-31-23',
             'complete': False
         }

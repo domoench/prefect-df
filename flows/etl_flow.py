@@ -74,6 +74,8 @@ def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFr
 
     result_dfs = [future.result() for future in result_df_futures]
     api_df = pd.concat(result_dfs)
+    assert api_df.index.min() == start_ts
+    assert api_df.index.max() == end_ts
     return api_df
 
 
@@ -136,12 +138,6 @@ def initialize_chunk_index():
     git_repo = get_local_dvc_git_repo()
     dvc_repo = get_DvcRepo()
 
-    """
-    tree = git_repo.head.commit.tree
-    from IPython.core.debugger import set_trace; set_trace()
-    files_and_dirs = [(entry, entry.name, entry.type) for entry in tree]
-    """
-
     # Get the chunk index
     # Index file at v1/chunk_idx.parquet
     # v1 data files at v1/data/
@@ -149,7 +145,7 @@ def initialize_chunk_index():
     chunk_data_path = local_dvc_repo_path / 'v1/data'
     try:
         idx_df = pd.read_parquet(chunk_idx_path)
-        raise NotImplementedError  # TODO: Deal with general case when index exists
+        # TODO: Deal with general case when index exists
     except FileNotFoundError:
         ensure_empty_dir(chunk_idx_path)
         ensure_empty_dir(chunk_data_path / '*')
@@ -182,7 +178,7 @@ def initialize_chunk_index():
     assert has_full_hourly_index(df)
 
     # Create chunk index
-    chunk_idx_df = calculate_chunk_index(df.index.min(), df.index.max())
+    chunk_idx_df = calculate_chunk_index(df)
 
     # Create chunk dataframes
     chunk_dfs = []
@@ -215,7 +211,7 @@ def initialize_chunk_index():
     if len(diff_files) > 0:
         print('Staged files:')
         pp(diff_files)
-        commit_msg = 'Add chunked dataset.'
+        commit_msg = 'Update chunked dataset.'
         commit = git_repo.index.commit(commit_msg)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}')

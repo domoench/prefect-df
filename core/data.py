@@ -8,7 +8,7 @@ from core.consts import EIA_MAX_REQUEST_ROWS
 from core.types import DVCDatasetInfo, validate_call
 from core.gx.gx import gx_validate_df
 from core.holidays import is_holiday
-from core.utils import merge_intervals
+from core.utils import merge_intervals, has_full_hourly_index
 from prefect.blocks.system import Secret
 from datetime import datetime
 from git import Repo as GitRepo
@@ -68,32 +68,42 @@ def calculate_lag_backfill_ranges(df):
     return ranges
 
 
-def calculate_chunk_index(start_ts: datetime, end_ts: datetime) -> pd.DataFrame:
-    """Index the given interval by standard calendar (not fiscal) quarter
+def calculate_chunk_index(df: pd.DataFrame) -> pd.DataFrame:
+    """Index the given dataframe's time interval by standard calendar (not fiscal) quarter
     chunks/intervals. Each chunk in the index has a boolean flag to specify whether
     it is complete (has data for every hour) or not."""
-    q_start = pd.Timestamp(start_ts).to_period('Q').start_time.tz_localize('UTC')
-    q_end = pd.Timestamp(end_ts).to_period('Q').end_time.tz_localize('UTC')
+    assert has_full_hourly_index(df)
 
-    first_chunk_complete = start_ts == q_start
-    last_chunk_complete = end_ts == q_end
+    start_ts, end_ts = df.index.min(), df.index.max()
+
+    # Beginning and end of logical (quarter) chunks
+    q_start_ts = pd.Timestamp(start_ts).to_period('Q').start_time.tz_localize('UTC')
+    q_end_ts = pd.Timestamp(end_ts).to_period('Q').end_time.tz_localize('UTC')
+
+    first_chunk_complete = start_ts == q_start_ts
+    last_chunk_complete = end_ts == q_end_ts
 
     chunks = []
-    chunk_start = q_start
-    while chunk_start < q_end:
-        chunk_end = chunk_start + pd.offsets.QuarterBegin(startingMonth=1) - pd.Timedelta(hours=1)
-        chunk_name = f'{chunk_start.year}_Q{chunk_start.quarter}' \
-                     f"_from_{chunk_start.strftime('%Y-%m-%d-%H')}" \
-                     f"_to_{chunk_end.strftime('%Y-%m-%d-%H')}"
+    chunk_start_ts = q_start_ts
+    while chunk_start_ts < q_end_ts:
+        chunk_end_ts = chunk_start_ts + pd.offsets.QuarterBegin(startingMonth=1) - pd.Timedelta(hours=1)
+        chunk_name = f'{chunk_start_ts.year}_Q{chunk_start_ts.quarter}' \
+                     f"_from_{chunk_start_ts.strftime('%Y-%m-%d-%H')}" \
+                     f"_to_{chunk_end_ts.strftime('%Y-%m-%d-%H')}"
+        # The actual data may or may not fill the whole logical chunk
+        data_start_ts = max(start_ts, chunk_start_ts)
+        data_end_ts = min(end_ts, chunk_end_ts)
         chunks.append({
-            'year': chunk_start.year,
-            'quarter': chunk_start.quarter,
-            'start_ts': chunk_start,
-            'end_ts': chunk_end,
+            'year': chunk_start_ts.year,
+            'quarter': chunk_start_ts.quarter,
+            'start_ts': chunk_start_ts,  # Start of the logical chunk
+            'end_ts': chunk_end_ts,  # End of the logical chunk
+            'data_start_ts': data_start_ts,  # Start of actual data for this chunk
+            'data_end_ts': data_end_ts,  # End of actual data for this chunk
             'name': chunk_name,
-            'complete': True  # Dummy value
+            'complete': chunk_start_ts == data_start_ts and chunk_end_ts == data_end_ts,
             })
-        chunk_start += pd.offsets.QuarterBegin(startingMonth=1)
+        chunk_start_ts += pd.offsets.QuarterBegin(startingMonth=1)
 
     chunks[0]['complete'] = first_chunk_complete
     chunks[-1]['complete'] = last_chunk_complete
