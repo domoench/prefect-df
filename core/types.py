@@ -29,10 +29,10 @@ class DVCDatasetInfo(BaseModel):
 class ChunkIndexSchema(pa.DataFrameModel):
     year: int
     quarter: int
-    start_ts: pd.DatetimeTZDtype(tz='UTC')
-    end_ts: pd.DatetimeTZDtype(tz='UTC')
-    data_start_ts: pd.DatetimeTZDtype(tz='UTC')
-    data_end_ts: pd.DatetimeTZDtype(tz='UTC')
+    start_ts: pd.DatetimeTZDtype(tz='UTC')  # type: ignore
+    end_ts: pd.DatetimeTZDtype(tz='UTC')  # type: ignore
+    data_start_ts: pd.DatetimeTZDtype(tz='UTC')  # type: ignore
+    data_end_ts: pd.DatetimeTZDtype(tz='UTC')  # type: ignore
     name: str
     complete: bool
 
@@ -72,3 +72,11 @@ class MLFlowModelInfo(BaseModel):
     specifier: MLFlowModelSpecifier
     model: PyFuncModel
     run: Run
+
+
+"""
+Exceptions
+"""
+
+class EIADataUnavailableException(Exception):
+    pass

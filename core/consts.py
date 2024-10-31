@@ -3,7 +3,7 @@
 EIA_EARLIEST_HOUR_UTC = '2019-01-01 00:00:00+00:00'
 
 # Number of hours to give EIA time to collect data from balancing authorities
-EIA_BUFFER_HOURS = 2 * 24
+EIA_BUFFER_HOURS = 3 * 24
 
 # Ensure the number of hours available to the evaluation set (to be excluded
 # from training.

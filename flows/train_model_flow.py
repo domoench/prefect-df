@@ -42,7 +42,7 @@ def preprocess_data(df: pd.DataFrame):
 
 @task
 @validate_call
-def clean_data(df: pd.DataFrame):
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
     """Cap outliers and impute null values"""
     # Cap threshold values
     df = cap_column_outliers(df, 'D', EIA_MIN_D_VAL, EIA_MAX_D_VAL)
@@ -52,7 +52,7 @@ def clean_data(df: pd.DataFrame):
 
 @task
 @validate_call
-def features(df: pd.DataFrame):
+def features(df: pd.DataFrame) -> pd.DataFrame:
     # Add temporal features
     df = add_time_meaning_features(df)
     df = add_time_lag_features(df)
@@ -87,11 +87,12 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame, dvc_dataset_info: DVCDat
 
 @task
 @validate_call
-def train_xgb_with_tracking(train_df: pd.DataFrame, features, dvc_dataset_info: DVCDatasetInfo):
+def train_xgb_with_tracking(
+    train_df: pd.DataFrame, features, dvc_dataset_info: DVCDatasetInfo
+) -> xgboost.sklearn.XGBRegressor:
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     mlflow.set_experiment('xgb.df.train')
-    reg = None
     with mlflow.start_run():
         mlflow_emit_tags_and_params(train_df, dvc_dataset_info)
 
@@ -103,11 +104,11 @@ def train_xgb_with_tracking(train_df: pd.DataFrame, features, dvc_dataset_info: 
 
 
 @task
-def add_lag_backfill_data(df: pd.DataFrame):
+def add_lag_backfill_data(df: pd.DataFrame) -> pd.DataFrame:
     """For the given datetime-indexed dataframe, fetch the same date range for
     the past 3 years, and return a dataframe with those rows prefixed. """
     df = df.copy()
-    lag_dfs = []
+    lag_dfs: list[pd.DataFrame] = []
     for (lag_start_ts, lag_end_ts) in calculate_lag_backfill_ranges(df):
         lag_df = concurrent_fetch_EIA_data(lag_start_ts, lag_end_ts)
         lag_dfs.append(lag_df)

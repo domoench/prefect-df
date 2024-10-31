@@ -2,19 +2,18 @@ from prefect import flow, task
 from prefect.tasks import task_input_hash
 from core.consts import EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
 from core.data import (
-    request_EIA_data, get_dvc_remote_repo_url, get_local_dvc_git_repo,
-    get_dvc_dataset_as_df, calculate_chunk_index, get_DvcRepo
+    request_EIA_data, get_dvc_remote_repo_url, get_dvc_GitRepo_client,
+    get_dvc_dataset_as_df, get_DvcRepo_client, chunk_index_intersection,
+    get_chunk_index, ChunkIndex, commit_df_to_dvc_in_chunks
 )
-from core.types import DVCDatasetInfo, validate_call
+from core.types import DVCDatasetInfo, validate_call, EIADataUnavailableException
 from core.utils import (
-    obj_key_with_timestamps, ensure_empty_dir, df_summary,
-    compact_ts_str, utcnow_minus_buffer_ts, create_timeseries_df_1h,
-    remove_rows_with_duplicate_indices, concat_time_indexed_dfs,
-    has_full_hourly_index
+    ensure_empty_dir, df_summary, utcnow_minus_buffer_ts,
+    create_timeseries_df_1h, remove_rows_with_duplicate_indices,
+    concat_time_indexed_dfs
 )
 from datetime import datetime
 from pathlib import Path
-from pprint import pp
 import os
 import pandas as pd
 
@@ -47,7 +46,10 @@ def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFr
     # our time range
     r = request_EIA_data(start_ts, end_ts, 0)
     num_total_records = int(r.json()['response']['total'])
-    print(f'Total records to fetch: {num_total_records}')
+    if num_total_records != hours:
+        # TODO should we fail here instead?
+        print(f'Warning: EIA does not have all the data we are requesting.'
+              f'Records requested: {hours}. Records available: {num_total_records}')
 
     # Calculate how many paginated API requests will be required to fetch all
     # the timeseries data
@@ -74,29 +76,47 @@ def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFr
 
     result_dfs = [future.result() for future in result_df_futures]
     api_df = pd.concat(result_dfs)
-    assert api_df.index.min() == start_ts
-    assert api_df.index.max() == end_ts
+    print('api_df')
+    print(api_df)
+
+    # EIA results quantize the search to the day, so often extra hours are present
+    # in the result.
+    request_range_mask = (api_df.index >= start_ts) & (api_df.index <= end_ts)
+    num_extra_records = (~request_range_mask).sum()
+    if num_extra_records > 0:
+        print(f'Trimming off {num_extra_records} extra records.')
+    api_df = api_df[request_range_mask]
     return api_df
 
 
 @task
 @validate_call
-# TODO  -> List(pd.DataFrame)
-def extract(start_ts: datetime, end_ts: datetime):
+def extract(start_ts: datetime, end_ts: datetime) -> pd.DataFrame | None:
     """Fetch any EIA demand timeseries data in the specified range that is not
     already in the DVC warehouse."""
+    chunk_idx = get_chunk_index()
+    hit_range, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
+    if miss_range:
+        fetched_df = concurrent_fetch_EIA_data(*miss_range)
 
-    # TODO: EIA no longer serves data from before 2019.
-    # Backfill to 2015 from current DVC file, then remove.
+        print(f'Requested range: start:{start_ts}. end:{end_ts}')
+        print(f'   Cached range: start:{chunk_idx.iloc[0].data_start_ts}.'
+              f' end:{chunk_idx.iloc[-1].data_end_ts}.')
+        print(f'      Hit range: start:{hit_range[0]}. end:{hit_range[1]}.')
+        if miss_range:
+            print(f'     Miss range: start:{miss_range[0]}. end:{miss_range[1]}.')
 
-    eia_df = concurrent_fetch_EIA_data(start_ts, end_ts)
-    print(df_summary(eia_df))
-    return eia_df
+        if len(fetched_df) == 0:
+            raise EIADataUnavailableException
+        print(f'Fetched range: start:{fetched_df.index.min()}. end:{fetched_df.index.max()}')
+        print('Fetched data summary:')
+        print(df_summary(fetched_df))
+        return fetched_df
 
 
 @task
 @validate_call
-def transform(eia_df: pd.DataFrame):
+def transform(eia_df: pd.DataFrame) -> pd.DataFrame:
     """Convert types, drop duplicates, add D column, ensure every hour."""
     print('Transforming timeseries.')
 
@@ -131,166 +151,9 @@ def transform(eia_df: pd.DataFrame):
 
 
 @task
-def initialize_chunk_index():
-    """Temporary: Create the initial chunk index"""
-    # Get clean DVC git repo
-    local_dvc_repo_path = Path(os.getenv('DVC_LOCAL_REPO_PATH'))
-    git_repo = get_local_dvc_git_repo()
-    dvc_repo = get_DvcRepo()
-
-    # Get the chunk index
-    # Index file at v1/chunk_idx.parquet
-    # v1 data files at v1/data/
-    chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
-    chunk_data_path = local_dvc_repo_path / 'v1/data'
-    try:
-        idx_df = pd.read_parquet(chunk_idx_path)
-        # TODO: Deal with general case when index exists
-    except FileNotFoundError:
-        ensure_empty_dir(chunk_idx_path)
-        ensure_empty_dir(chunk_data_path / '*')
-
-    # TODO: First time through index will be empty, and we'll write it
-    # assert len(idx_df) == 0
-
-    # Use dvc data from 2015 to 2019
-    df_env = os.getenv('DF_ENVIRONMENT')
-    if df_env == 'dev':
-        git_PAT = os.getenv('DVC_GIT_REPO_PAT')
-        dvc_dataset_info = DVCDatasetInfo(
-            rev="878c85c65fac01ce2054cd752bd68ac64cb8d815",
-            path="data/eia_d_df_2015-07-01_05_2024-08-05_18.parquet",
-            repo=get_dvc_remote_repo_url(git_PAT)
-        )
-        df_2015_2019 = get_dvc_dataset_as_df(dvc_dataset_info)
-        df_2015_2019 = df_2015_2019[['D']]
-    else:
-        raise NotImplementedError # TODO
-
-    # Fetch 2019 to end from EIA data
-    fetch_start_ts = df_2015_2019.index.max()
-    fetch_end_ts = utcnow_minus_buffer_ts()
-    df_fetched = extract(fetch_start_ts, fetch_end_ts)
-    df_fetched = transform(df_fetched)
-
-    # Concatenate DVC and EIA-API fetched datasets
-    df = concat_time_indexed_dfs([df_2015_2019, df_fetched])
-    assert has_full_hourly_index(df)
-
-    # Create chunk index
-    chunk_idx_df = calculate_chunk_index(df)
-
-    # Create chunk dataframes
-    chunk_dfs = []
-    for _, row in chunk_idx_df.iterrows():
-        start_mask = df.index >= row['start_ts']
-        end_mask = df.index <= row['end_ts']
-        chunk_df = df[start_mask & end_mask]
-        chunk_dfs.append(chunk_df)
-
-    # Write chunk files to disk
-    for i, chunk_df in enumerate(chunk_dfs):
-        # Write chunk to disk
-        file_name = f"{chunk_idx_df.loc[i]['name']}.parquet"
-        dataset_path = chunk_data_path / file_name
-        chunk_df.to_parquet(dataset_path)
-        # Add chunk to dvc tracking
-        dvc_repo.add(dataset_path)
-        # Stage file for git tracking
-        git_repo.git.add(dataset_path.with_suffix('.parquet.dvc'))
-
-    # Write chunk index to disk
-    chunk_idx_df.to_parquet(chunk_idx_path)
-
-    # Git stage non-data files
-    git_repo.git.add(chunk_data_path / '.gitignore')
-    git_repo.git.add(chunk_idx_path)
-
-    diffs = git_repo.index.diff('HEAD')
-    diff_files = list(map(lambda d: d.a_path, diffs))
-    if len(diff_files) > 0:
-        print('Staged files:')
-        pp(diff_files)
-        commit_msg = 'Update chunked dataset.'
-        commit = git_repo.index.commit(commit_msg)
-        git_commit_hash = str(commit)
-        print(f'Git commit hash: {git_commit_hash}')
-        origin = git_repo.remote(name='origin')
-        # Push commit
-        origin.push()
-
-        print('Pushing dataset to DVC remote storage')
-        # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-        dvc_repo.push()
-    else:
-        print(f'No dataset changes.')
-
-    # Commit chunks and index to dvc/git
-    print('Done writing chunks and index')
-
-
-@task
-def load_to_dvc(df: pd.DataFrame) -> DVCDatasetInfo:
-    print('Loading timeseries into warehouse.')
-
-    """
-    # Ensure clean local git/dvc repo directory
-    local_dvc_repo = os.getenv('DVC_LOCAL_REPO_PATH')
-    ensure_empty_dir(local_dvc_repo)
-
-    # Clone the git repo
-    git_repo_url = get_dvc_remote_repo_url()
-    git_repo = GitRepo.clone_from(git_repo_url, local_dvc_repo)
-    """
-    # TODO: Deprecated above and most of below for chunked logic
-
-    # Initialize git and dvc python client instances
-    git_repo = get_local_dvc_git_repo()
-    dvc_repo = get_DvcRepo()
-
-    # Write dataset file into local directory
-    start_ts = df.index.min()
-    end_ts = df.index.max()
-    filename = obj_key_with_timestamps('eia_d_df', start_ts, end_ts)
-    local_dvc_repo_path = os.getenv('DVC_LOCAL_REPO_PATH')
-    dataset_path = f'data/{filename}'
-    local_dataset_path = f'{local_dvc_repo_path}/{dataset_path}'
-    df.to_parquet(local_dataset_path)
-
-    # Add dataset to dvc tracking
-    dvc_repo.add(local_dataset_path)
-
-    # Git Tracking
-    git_repo.git.add(f'{local_dataset_path}.dvc')
-    git_repo.git.add(f'{local_dvc_repo_path}/data/.gitignore')
-
-    diffs = git_repo.index.diff('HEAD')
-    diff_files = list(map(lambda d: d.a_path, diffs))
-    git_commit_hash = None
-    if len(diff_files) > 0:
-        print(f'Staged files:\n{diff_files}')
-        commit_msg = f'Add dataset.\n' \
-            f'start:{compact_ts_str(start_ts)}\nend:{compact_ts_str(end_ts)}\n\n' \
-            f'{df_summary(df)}'
-        commit = git_repo.index.commit(commit_msg)
-        git_commit_hash = str(commit)
-        print(f'Git commit hash: {git_commit_hash}')
-        origin = git_repo.remote(name='origin')
-        # Push commit
-        origin.push()
-
-        print('Pushing dataset to DVC remote storage')
-        # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
-        dvc_repo.push()
-    else:
-        git_commit_hash = str(git_repo.head.commit)
-        print(f'No dataset changes. Using HEAD as commit hash: {git_commit_hash}')
-
-    return DVCDatasetInfo(
-        repo=get_dvc_remote_repo_url(),
-        path=dataset_path,
-        rev=git_commit_hash,
-    )
+def load(df: pd.DataFrame):
+    """Load the data into the data warehouse."""
+    commit_df_to_dvc_in_chunks(df)
 
 
 @flow(log_prints=True)
@@ -301,17 +164,9 @@ def etl(
     """Idempotently ensures all available hourly EIA demand data between the given start
     and end timestamps are persisted in the DVC data warehouse as a parquet chunk files.
     """
-    # chunks = extract(start_ts, end_ts) TODO
-    initialize_chunk_index()
-
-    # TODO: General case
-    # Check chunk index
-    # Decide which data must be fetched from API
-    # Fetch data
-    # Write new data to dvc chunks and update chunk index
-
-    """
+    df = extract(start_ts, end_ts)
+    if df is None:
+        print('Requested data range already exists in DVC data warehouse.')
+        return
     df = transform(df)
-    dvc_data_info = load_to_dvc(df)
-    return dvc_data_info
-    """
+    load(df)

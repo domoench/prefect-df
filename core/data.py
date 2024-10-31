@@ -13,6 +13,8 @@ from prefect.blocks.system import Secret
 from datetime import datetime
 from git import Repo as GitRepo
 from dvc.repo import Repo as DvcRepo
+from pathlib import Path
+from pprint import pp
 import numpy as np
 import pandas as pd
 import dvc.api
@@ -111,6 +113,16 @@ def calculate_chunk_index(df: pd.DataFrame) -> ChunkIndex:
     return ChunkIndex(chunk_df)
 
 
+def get_chunk_index() -> ChunkIndex:
+    # Ensure dvc repo exists on local filesystem
+    _ = get_dvc_GitRepo_client()
+
+    local_dvc_repo_path = Path(os.getenv('DVC_LOCAL_REPO_PATH'))
+    chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
+    chunk_idx_df = pd.read_parquet(chunk_idx_path)
+    return ChunkIndex(chunk_idx_df)
+
+
 @validate_call
 def chunk_index_intersection(chunk_idx: ChunkIndex, start_ts: datetime, end_ts: datetime):
     """Given a chunk index and a (start_ts, end_ts) requested range, determine the intersection
@@ -203,32 +215,40 @@ def request_EIA_data(start_ts: datetime, end_ts: datetime, offset, length=EIA_MA
 DVC
 """
 
+# Maintain a singleton GitRepo client
+git_repo = None
 
-def get_local_dvc_git_repo():
-    """Ensure the dvc git repo is on the local filsystem in a clean state."""
+
+def get_dvc_GitRepo_client():
+    """Return a GitRepo client."""
+    global git_repo
+    if git_repo is not None:
+        return git_repo
+
+    # Else, we must initialize
     local_dvc_repo_path = os.getenv('DVC_LOCAL_REPO_PATH')
     directory = os.path.dirname(local_dvc_repo_path)
     # Create the directory and clone the repo if necessary
-    git_repo = None
     if not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)
         git_repo_url = get_dvc_remote_repo_url()
         git_repo = GitRepo.clone_from(git_repo_url, local_dvc_repo_path)
+    # Else the directory exists already
     else:
         git_repo = GitRepo(local_dvc_repo_path)
         # Ensure no unstaged changes
-        assert not git_repo.is_dirty(untracked_files=True) # TODO something better
+        assert not git_repo.is_dirty(untracked_files=True)  # TODO something better
         print('DVC git repo is clean')
     return git_repo
 
 
-def get_DvcRepo():
+def get_DvcRepo_client():
     """Return a DvcRepo instance to interact with the local dvc repo."""
     local_dvc_repo_path = os.getenv('DVC_LOCAL_REPO_PATH')
     return DvcRepo(local_dvc_repo_path)
 
 
-def get_dvc_remote_repo_url(github_PAT: str = None) -> str:
+def get_dvc_remote_repo_url(github_PAT: str | None = None) -> str:
     if github_PAT is None:
         if os.getenv('DF_ENVIRONMENT') == 'prod':
             github_PAT = Secret.load('dvc-git-repo-pat-prod').get()
@@ -257,3 +277,65 @@ def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
 
 def get_dvc_dataset_url(ddi: DVCDatasetInfo):
     return dvc.api.get_url(path=ddi.path, repo=ddi.repo, rev=ddi.rev)
+
+
+def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
+    """Commit the given dataframe to DVC in quarterly indexed chunks."""
+    assert has_full_hourly_index(df)
+    git_repo = get_dvc_GitRepo_client()
+    dvc_repo = get_DvcRepo_client()
+
+    # Create an in-memory chunk index for the given dataset
+    chunk_idx = calculate_chunk_index(df)
+
+    print('Attempting to commit the following chunks to DVC:')
+    print(chunk_idx)
+
+    # Create chunk dataframes
+    chunk_dfs = []
+    for _, row in chunk_idx.iterrows():
+        start_mask = df.index >= row['start_ts']
+        end_mask = df.index <= row['end_ts']
+        chunk_df = df[start_mask & end_mask]
+        chunk_dfs.append(chunk_df)
+
+    # Write chunk files to disk
+    local_dvc_repo_path = Path(os.getenv('DVC_LOCAL_REPO_PATH'))
+    chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
+    chunk_data_path = local_dvc_repo_path / 'v1/data'
+    for i, chunk_df in enumerate(chunk_dfs):
+        # Write chunk to disk
+        file_name = f"{chunk_idx.loc[i]['name']}.parquet"
+        dataset_path = chunk_data_path / file_name
+        chunk_df.to_parquet(dataset_path)
+        # Add chunk to dvc tracking
+        dvc_repo.add(dataset_path)
+        # Stage file for git tracking
+        git_repo.git.add(dataset_path.with_suffix('.parquet.dvc'))
+
+    # Write chunk index to disk
+    chunk_idx.to_parquet(chunk_idx_path)
+
+    # Git stage non-data files
+    git_repo.git.add(chunk_data_path / '.gitignore')
+    git_repo.git.add(chunk_idx_path)
+
+    diffs = git_repo.index.diff('HEAD')
+    diff_files = list(map(lambda d: d.a_path, diffs))
+    if len(diff_files) > 0:
+        print('Staged files:')
+        pp(diff_files)
+        raise Exception # TODO: Let's try before actually commiting
+        commit_msg = 'Update dataset.'
+        commit = git_repo.index.commit(commit_msg)
+        git_commit_hash = str(commit)
+        print(f'Git commit hash: {git_commit_hash}')
+        origin = git_repo.remote(name='origin')
+        # Push commit
+        origin.push()
+
+        print('Pushing dataset to DVC remote storage')
+        # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
+        dvc_repo.push()
+    else:
+        print(f'No dataset changes.')
