@@ -197,3 +197,15 @@ def merge_intervals(intervals):
     merged.append((curr_s, curr_e))
 
     return merged
+
+
+def interval_intersection(a, b):
+    """Calculate the intersection interval of 2 given intervals"""
+    assert a[0] <= a[1]
+    assert b[0] <= b[1]
+    a, b = sorted([a, b], key=lambda x: x[0])
+
+    if a[1] < b[0]:
+        return None
+
+    return (b[0], min(a[1], b[1]))

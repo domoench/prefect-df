@@ -5,10 +5,10 @@ Module containing logic for getting and persisting data, and feature engineering
 from scipy.stats import skew
 from collections import defaultdict
 from core.consts import EIA_MAX_REQUEST_ROWS
-from core.types import DVCDatasetInfo, validate_call
+from core.types import DVCDatasetInfo, validate_call, ChunkIndex
 from core.gx.gx import gx_validate_df
 from core.holidays import is_holiday
-from core.utils import merge_intervals, has_full_hourly_index
+from core.utils import merge_intervals, has_full_hourly_index, interval_intersection
 from prefect.blocks.system import Secret
 from datetime import datetime
 from git import Repo as GitRepo
@@ -68,7 +68,7 @@ def calculate_lag_backfill_ranges(df):
     return ranges
 
 
-def calculate_chunk_index(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_chunk_index(df: pd.DataFrame) -> ChunkIndex:
     """Index the given dataframe's time interval by standard calendar (not fiscal) quarter
     chunks/intervals. Each chunk in the index has a boolean flag to specify whether
     it is complete (has data for every hour) or not."""
@@ -108,7 +108,23 @@ def calculate_chunk_index(df: pd.DataFrame) -> pd.DataFrame:
     chunks[0]['complete'] = first_chunk_complete
     chunks[-1]['complete'] = last_chunk_complete
     chunk_df = pd.DataFrame(chunks)
-    return chunk_df
+    return ChunkIndex(chunk_df)
+
+
+@validate_call
+def chunk_index_intersection(chunk_idx: ChunkIndex, start_ts: datetime, end_ts: datetime):
+    """Given a chunk index and a (start_ts, end_ts) requested range, determine the intersection
+    between the contiguous range covered by the index and the requested range. Return 2 range
+    tuples: one describing the 'hit' range, and the other the 'miss' range."""
+    cache_start, cache_end = (chunk_idx.iloc[0].data_start_ts, chunk_idx.iloc[-1].data_end_ts)
+    req_start, req_end = (start_ts, end_ts)
+
+    if req_start < cache_start:
+        raise NotImplementedError('Current assumption is that oldest available data is in the index.')
+
+    hit_range = interval_intersection((cache_start, cache_end), (req_start, req_end))
+    miss_range = (cache_end + pd.Timedelta(hours=1), req_end) if req_end > cache_end else None
+    return (hit_range, miss_range)
 
 
 def add_holiday_feature(df):

@@ -27,6 +27,7 @@ ipykernel = "*"
 seaborn = "*"
 great-expectations = "*"
 prefect-aws = "*"
+pandera = "*"
 
 [dev-packages]
 flake8 = "*"

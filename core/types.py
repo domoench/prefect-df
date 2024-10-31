@@ -1,4 +1,6 @@
 import pydantic
+import pandera as pa
+import pandas as pd
 from pydantic import BaseModel, ConfigDict
 from mlflow.pyfunc import PyFuncModel
 from mlflow.entities import Run
@@ -10,6 +12,11 @@ def validate_call(func):
     return pydantic.validate_call(func, config={'arbitrary_types_allowed': True, 'strict': True})
 
 
+"""
+DVC Types
+"""
+
+
 class DVCDatasetInfo(BaseModel):
     # Git URL
     repo: str
@@ -17,6 +24,24 @@ class DVCDatasetInfo(BaseModel):
     path: str
     # Git commit for this DVC dataset version
     rev: str
+
+
+class ChunkIndexSchema(pa.DataFrameModel):
+    year: int
+    quarter: int
+    start_ts: pd.DatetimeTZDtype(tz='UTC')
+    end_ts: pd.DatetimeTZDtype(tz='UTC')
+    data_start_ts: pd.DatetimeTZDtype(tz='UTC')
+    data_end_ts: pd.DatetimeTZDtype(tz='UTC')
+    name: str
+    complete: bool
+
+
+# Wrapper class for dataframe, enforcing that it follows the chunk index schema
+class ChunkIndex(pd.DataFrame):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        ChunkIndexSchema.validate(self)
 
 
 """
