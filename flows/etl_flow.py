@@ -2,18 +2,15 @@ from prefect import flow, task
 from prefect.tasks import task_input_hash
 from core.consts import EIA_EARLIEST_HOUR_UTC, EIA_MAX_REQUEST_ROWS
 from core.data import (
-    request_EIA_data, get_dvc_remote_repo_url, get_dvc_GitRepo_client,
-    get_dvc_dataset_as_df, get_DvcRepo_client, chunk_index_intersection,
-    get_chunk_index, ChunkIndex, commit_df_to_dvc_in_chunks
+    request_EIA_data, chunk_index_intersection, get_chunk_index,
+    commit_df_to_dvc_in_chunks
 )
-from core.types import DVCDatasetInfo, validate_call, EIADataUnavailableException
+from core.types import validate_call, EIADataUnavailableException
 from core.utils import (
-    ensure_empty_dir, df_summary, utcnow_minus_buffer_ts,
-    create_timeseries_df_1h, remove_rows_with_duplicate_indices,
-    concat_time_indexed_dfs
+    df_summary, utcnow_minus_buffer_ts, create_timeseries_df_1h,
+    remove_rows_with_duplicate_indices
 )
 from datetime import datetime
-from pathlib import Path
 import os
 import pandas as pd
 
@@ -21,7 +18,7 @@ import pandas as pd
 @task
 @validate_call
 def get_eia_data_as_df(
-    start_ts: datetime, end_ts: datetime, offset=0, length=EIA_MAX_REQUEST_ROWS
+    start_ts: pd.Timestamp, end_ts: pd.Timestamp, offset: int = 0, length=EIA_MAX_REQUEST_ROWS
 ) -> pd.DataFrame:
     """Fetch EIA power demand data for the given time range and API page offset.
     Return a dataframe with a datetime index."""
@@ -39,6 +36,15 @@ def get_eia_data_as_df(
 @task(cache_key_fn=task_input_hash, refresh_cache=(os.getenv('DF_ENVIRONMENT') == 'dev'))
 @validate_call
 def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFrame:
+    # Quantize the start and end timestamps to midnight. The EIA API sometimes freaks
+    # out and returns nothing otherwise.
+    orig_start_ts, orig_end_ts = start_ts, end_ts
+    start_ts = start_ts.normalize()
+    end_ts = (end_ts + pd.Timedelta(days=1)).normalize()
+    print('Quantizing fetch interval.\n'
+          f' Original: start:{orig_start_ts}. end:{orig_end_ts}\n'
+          f'Quantized: start:{start_ts}. end:{end_ts}\n')
+
     time_span = end_ts - start_ts
     hours = int(time_span.total_seconds() / 3600)
 
@@ -46,9 +52,9 @@ def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFr
     # our time range
     r = request_EIA_data(start_ts, end_ts, 0)
     num_total_records = int(r.json()['response']['total'])
-    if num_total_records != hours:
+    if num_total_records <= hours:
         # TODO should we fail here instead?
-        print(f'Warning: EIA does not have all the data we are requesting.'
+        print(f'Warning: EIA does not have all the data we are requesting. '
               f'Records requested: {hours}. Records available: {num_total_records}')
 
     # Calculate how many paginated API requests will be required to fetch all
@@ -79,9 +85,8 @@ def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFr
     print('api_df')
     print(api_df)
 
-    # EIA results quantize the search to the day, so often extra hours are present
-    # in the result.
-    request_range_mask = (api_df.index >= start_ts) & (api_df.index <= end_ts)
+    # Trim back to original request time range
+    request_range_mask = (api_df.index >= orig_start_ts) & (api_df.index <= orig_end_ts)
     num_extra_records = (~request_range_mask).sum()
     if num_extra_records > 0:
         print(f'Trimming off {num_extra_records} extra records.')
@@ -91,7 +96,7 @@ def concurrent_fetch_EIA_data(start_ts: datetime, end_ts: datetime) -> pd.DataFr
 
 @task
 @validate_call
-def extract(start_ts: datetime, end_ts: datetime) -> pd.DataFrame | None:
+def extract(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame | None:
     """Fetch any EIA demand timeseries data in the specified range that is not
     already in the DVC warehouse."""
     chunk_idx = get_chunk_index()
@@ -156,6 +161,8 @@ def load(df: pd.DataFrame):
     commit_df_to_dvc_in_chunks(df)
 
 
+# TODO: These default times don't acutally work as expected. They bind the default values
+# to the time the flow was deployed, not the time a flow run is initiated.
 @flow(log_prints=True)
 def etl(
     start_ts: datetime = pd.to_datetime(EIA_EARLIEST_HOUR_UTC).to_pydatetime(),
@@ -164,6 +171,7 @@ def etl(
     """Idempotently ensures all available hourly EIA demand data between the given start
     and end timestamps are persisted in the DVC data warehouse as a parquet chunk files.
     """
+    start_ts, end_ts = pd.Timestamp(start_ts), pd.Timestamp(end_ts)
     df = extract(start_ts, end_ts)
     if df is None:
         print('Requested data range already exists in DVC data warehouse.')

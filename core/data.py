@@ -8,7 +8,10 @@ from core.consts import EIA_MAX_REQUEST_ROWS
 from core.types import DVCDatasetInfo, validate_call, ChunkIndex
 from core.gx.gx import gx_validate_df
 from core.holidays import is_holiday
-from core.utils import merge_intervals, has_full_hourly_index, interval_intersection
+from core.utils import (
+    merge_intervals, has_full_hourly_index, interval_intersection,
+    concat_time_indexed_dfs
+)
 from prefect.blocks.system import Secret
 from datetime import datetime
 from git import Repo as GitRepo
@@ -187,7 +190,9 @@ def impute_null_demand_values(df):
 
 
 @validate_call
-def request_EIA_data(start_ts: datetime, end_ts: datetime, offset, length=EIA_MAX_REQUEST_ROWS):
+def request_EIA_data(
+    start_ts: pd.Timestamp, end_ts: pd.Timestamp, offset, length=EIA_MAX_REQUEST_ROWS
+):
     print(f'Fetching API page. offset:{offset}. length:{length}')
     url = ('https://api.eia.gov/v2/electricity/rto/region-data/data/?'
            'frequency=hourly&data[0]=value&facets[respondent][]=PJM&'
@@ -256,7 +261,22 @@ def get_dvc_remote_repo_url(github_PAT: str | None = None) -> str:
             github_PAT = os.getenv('DVC_GIT_REPO_PAT')
     github_username = os.getenv('DVC_GIT_USERNAME')
     github_reponame = os.getenv('DVC_GIT_REPONAME')
-    return f'https://{github_username}:{github_PAT}@github.com/{github_username}/{github_reponame}.git'
+    return f'https://{github_username}:{github_PAT}@github.com/' \
+           f'{github_username}/{github_reponame}.git'
+
+
+def get_dvc_ref_for_chunk(
+    start_ts: pd.Timestamp, chunk_idx: ChunkIndex, git_rev: str
+) -> DVCDatasetInfo:
+    idx_row = chunk_idx[chunk_idx.start_ts == start_ts].iloc[0]
+    chunk_name = idx_row['name']
+    path = (Path('v1/data') / chunk_name).with_suffix('.parquet')
+    dvc_ref = DVCDatasetInfo(
+        path=str(path),
+        repo=get_dvc_remote_repo_url(),
+        rev=git_rev,
+    )
+    return dvc_ref
 
 
 def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
@@ -288,15 +308,35 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     # Create an in-memory chunk index for the given dataset
     chunk_idx = calculate_chunk_index(df)
 
-    print('Attempting to commit the following chunks to DVC:')
-    print(chunk_idx)
+    # We must compare the old chunk index with the new datasets chunk index
+    # to distinguish between update and append writes
+    old_chunk_idx = get_chunk_index()
+    print_chunk_index_diff(old_chunk_idx, chunk_idx)
+    update_starts, append_starts = diff_chunk_indices(old_chunk_idx, chunk_idx)
 
-    # Create chunk dataframes
+    # Create new chunk dataframes
     chunk_dfs = []
     for _, row in chunk_idx.iterrows():
-        start_mask = df.index >= row['start_ts']
-        end_mask = df.index <= row['end_ts']
+        start_ts, end_ts = row['start_ts'], row['end_ts']
+        start_mask = df.index >= start_ts
+        end_mask = df.index <= end_ts
         chunk_df = df[start_mask & end_mask]
+
+        # Distinguish between update and append
+        is_update = update_starts.eq(start_ts).any()
+        update_strs = []
+        if is_update:
+            # Fetch existing data for chunk from DVC
+            dvc_data_ref = get_dvc_ref_for_chunk(start_ts, old_chunk_idx, str(git_repo.head.commit))
+            dvc_chunk_df = get_dvc_dataset_as_df(dvc_data_ref)
+            # Merge old and new data for chunk
+            chunk_df = concat_time_indexed_dfs([dvc_chunk_df, chunk_df])
+            update_strs.append(
+                f'Updating chunk: {row.year}-Q{row.quarter}\n'
+                f'  Logical bounds: {row.start_ts} to {row.end_ts}\n'
+                f'  Old data range: {dvc_chunk_df.index.min()} to {dvc_chunk_df.index.max()}\n'
+                f'  New data range: {chunk_df.index.min()} to {chunk_df.index.max()}\n'
+            )
         chunk_dfs.append(chunk_df)
 
     # Write chunk files to disk
@@ -304,14 +344,18 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
     chunk_data_path = local_dvc_repo_path / 'v1/data'
     for i, chunk_df in enumerate(chunk_dfs):
-        # Write chunk to disk
-        file_name = f"{chunk_idx.loc[i]['name']}.parquet"
-        dataset_path = chunk_data_path / file_name
-        chunk_df.to_parquet(dataset_path)
-        # Add chunk to dvc tracking
-        dvc_repo.add(dataset_path)
-        # Stage file for git tracking
-        git_repo.git.add(dataset_path.with_suffix('.parquet.dvc'))
+        # Don't overwrite full chunks
+        chunk_start_ts = chunk_idx.loc[i].start_ts
+        old_chunk_is_complete = chunk_idx[chunk_idx.start_ts == chunk_start_ts].complete.item()
+        if not old_chunk_is_complete:
+            # Write new chunk to disk
+            file_name = f"{chunk_idx.loc[i]['name']}.parquet"
+            dataset_path = chunk_data_path / file_name
+            chunk_df.to_parquet(dataset_path)
+            # Add chunk to dvc tracking
+            dvc_repo.add(dataset_path)
+            # Stage file for git tracking
+            git_repo.git.add(dataset_path.with_suffix('.parquet.dvc'))
 
     # Write chunk index to disk
     chunk_idx.to_parquet(chunk_idx_path)
@@ -325,8 +369,8 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     if len(diff_files) > 0:
         print('Staged files:')
         pp(diff_files)
-        raise Exception # TODO: Let's try before actually commiting
-        commit_msg = 'Update dataset.'
+        commit_msg = 'Update dataset.\n\n'
+        commit_msg += '\n'.join(update_strs)
         commit = git_repo.index.commit(commit_msg)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}')
@@ -338,4 +382,36 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
         # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
         dvc_repo.push()
     else:
-        print(f'No dataset changes.')
+        print('No dataset changes.')
+
+
+def diff_chunk_indices(old_idx: ChunkIndex, new_idx: ChunkIndex):
+    """Diff two chunk indices, returning 2 lists of logical chunk start
+    timestamps: One indicating chunks that need updating, and the second
+    indicating chunks that are to be appended (all new data)."""
+    start_intersect_mask = old_idx.start_ts.isin(new_idx.start_ts)
+    old_partial_mask = ~old_idx.complete
+    update_starts = old_idx[start_intersect_mask & old_partial_mask].start_ts
+    new_append_mask = ~new_idx.start_ts.isin(old_idx.start_ts)
+    append_starts = new_idx[new_append_mask].start_ts
+    return (
+        update_starts.reset_index(drop=True),
+        append_starts.reset_index(drop=True)
+    )
+
+
+def print_chunk_index_diff(old_idx: ChunkIndex, new_idx: ChunkIndex):
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', 1000)
+    cols = ['year', 'quarter', 'start_ts', 'end_ts', 'complete']
+    update_starts, append_starts = diff_chunk_indices(old_idx, new_idx)
+    append_df = new_idx[new_idx.start_ts.isin(append_starts)]
+
+    # Ugly formatting below, but I can't seem to get textwrap.dedent to work
+    print(
+f"""
+Updating {len(update_starts)} chunks.
+{old_idx[old_idx.start_ts.isin(update_starts)][cols]}
+Appending {len(append_df)} chunks.
+{append_df[cols] if len(append_df) else ''}\
+""")

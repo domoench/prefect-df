@@ -1,6 +1,7 @@
 from core.data import (
     add_time_lag_features, add_holiday_feature, calculate_lag_backfill_ranges,
-    calculate_chunk_index, chunk_index_intersection
+    calculate_chunk_index, chunk_index_intersection, print_chunk_index_diff,
+    diff_chunk_indices
 )
 from core.utils import create_timeseries_df_1h
 from core.types import ChunkIndex
@@ -29,6 +30,31 @@ def timeseries_df():
         return df
 
     return _create_timeseries_df
+
+@pytest.fixture
+def chunk_indices():
+    # Return 2 partially-overlapping chunk indices
+    old_chunk_idx = ChunkIndex(pd.DataFrame({
+        'year': [2015, 2015, 2016, 2016, 2016, 2016],
+        'quarter': [3, 4, 1, 2, 3, 4],
+        'start_ts': [Timestamp('2015-07-01 00:00:00+0000', tz='UTC'), Timestamp('2015-10-01 00:00:00+0000', tz='UTC'), Timestamp('2016-01-01 00:00:00+0000', tz='UTC'), Timestamp('2016-04-01 00:00:00+0000', tz='UTC'), Timestamp('2016-07-01 00:00:00+0000', tz='UTC'), Timestamp('2016-10-01 00:00:00+0000', tz='UTC')],
+        'end_ts': [Timestamp('2015-09-30 23:00:00+0000', tz='UTC'), Timestamp('2015-12-31 23:00:00+0000', tz='UTC'), Timestamp('2016-03-31 23:00:00+0000', tz='UTC'), Timestamp('2016-06-30 23:00:00+0000', tz='UTC'), Timestamp('2016-09-30 23:00:00+0000', tz='UTC'), Timestamp('2016-12-31 23:00:00+0000', tz='UTC')],
+        'data_start_ts': [Timestamp('2015-07-01 05:00:00+0000', tz='UTC'), Timestamp('2015-10-01 00:00:00+0000', tz='UTC'), Timestamp('2016-01-01 00:00:00+0000', tz='UTC'), Timestamp('2016-04-01 00:00:00+0000', tz='UTC'), Timestamp('2016-07-01 00:00:00+0000', tz='UTC'), Timestamp('2016-10-01 00:00:00+0000', tz='UTC')],
+        'data_end_ts': [Timestamp('2015-09-30 23:00:00+0000', tz='UTC'), Timestamp('2015-12-31 23:00:00+0000', tz='UTC'), Timestamp('2016-03-31 23:00:00+0000', tz='UTC'), Timestamp('2016-06-30 23:00:00+0000', tz='UTC'), Timestamp('2016-09-30 23:00:00+0000', tz='UTC'), Timestamp('2016-12-20 23:00:00+0000', tz='UTC')],
+        'name': ['2015_Q3_from_2015-07-01-00_to_2015-09-30-23', '2015_Q4_from_2015-10-01-00_to_2015-12-31-23', '2016_Q1_from_2016-01-01-00_to_2016-03-31-23', '2016_Q2_from_2016-04-01-00_to_2016-06-30-23', '2016_Q3_from_2016-07-01-00_to_2016-09-30-23', '2016_Q4_from_2016-10-01-00_to_2016-12-31-23'],
+        'complete': [False, True, True, True, True, False],
+    }))
+    new_chunk_idx = ChunkIndex(pd.DataFrame({
+        'year': [2016, 2016, 2017, 2017],
+        'quarter': [3, 4, 1, 2],
+        'start_ts': [Timestamp('2016-07-01 00:00:00+0000', tz='UTC'), Timestamp('2016-10-01 00:00:00+0000', tz='UTC'), Timestamp('2017-01-01 00:00:00+0000', tz='UTC'), Timestamp('2017-04-01 00:00:00+0000', tz='UTC')],
+        'end_ts': [Timestamp('2016-09-30 23:00:00+0000', tz='UTC'), Timestamp('2016-12-31 23:00:00+0000', tz='UTC'), Timestamp('2017-03-31 23:00:00+0000', tz='UTC'), Timestamp('2017-06-30 23:00:00+0000', tz='UTC')],
+        'data_start_ts': [Timestamp('2016-07-15 08:00:00+0000', tz='UTC'), Timestamp('2016-10-01 00:00:00+0000', tz='UTC'), Timestamp('2017-01-01 00:00:00+0000', tz='UTC'), Timestamp('2017-04-01 00:00:00+0000', tz='UTC')],
+        'data_end_ts': [Timestamp('2016-09-30 23:00:00+0000', tz='UTC'), Timestamp('2016-12-31 23:00:00+0000', tz='UTC'), Timestamp('2017-03-31 23:00:00+0000', tz='UTC'), Timestamp('2017-06-15 10:00:00+0000', tz='UTC')],
+        'name': ['2016_Q3_from_2016-07-01-00_to_2016-09-30-23', '2016_Q4_from_2016-10-01-00_to_2016-12-31-23', '2017_Q1_from_2017-01-01-00_to_2017-03-31-23', '2017_Q2_from_2017-04-01-00_to_2017-06-30-23'],
+        'complete': [False, True, True, False]
+    }))
+    return [old_chunk_idx, new_chunk_idx]
 
 
 class TestData:
@@ -179,3 +205,30 @@ class TestData:
         assert miss_range is None
         assert hit_range[0] == start_ts
         assert hit_range[1] == end_ts
+
+    def test_diff_chunk_indices(self, chunk_indices):
+        old_chunk_idx, new_chunk_idx = chunk_indices
+        update_chunk_starts, append_chunk_starts = diff_chunk_indices(old_chunk_idx, new_chunk_idx)
+        assert update_chunk_starts.equals(
+            pd.Series([pd.Timestamp('2016-10-01 00:00:00+00:00')])
+        )
+        assert append_chunk_starts.equals(
+            pd.Series([
+                pd.Timestamp('2017-01-01 00:00:00+00:00'),
+                pd.Timestamp('2017-04-01 00:00:00+00:00'),
+            ])
+        )
+
+    def test_print_chunk_index_diff(self, capsys, chunk_indices):
+        old_chunk_idx, new_chunk_idx = chunk_indices
+        print_chunk_index_diff(old_chunk_idx, new_chunk_idx)
+
+        captured = capsys.readouterr()
+        assert captured.out == \
+            '\nUpdating 1 chunks.\n' \
+            '   year  quarter                  start_ts                    end_ts  complete\n' \
+            '5  2016        4 2016-10-01 00:00:00+00:00 2016-12-31 23:00:00+00:00     False\n' \
+            'Appending 2 chunks.\n' \
+            '   year  quarter                  start_ts                    end_ts  complete\n' \
+            '2  2017        1 2017-01-01 00:00:00+00:00 2017-03-31 23:00:00+00:00      True\n' \
+            '3  2017        2 2017-04-01 00:00:00+00:00 2017-06-30 23:00:00+00:00     False\n'
