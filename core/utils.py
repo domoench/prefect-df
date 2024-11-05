@@ -35,7 +35,7 @@ def parse_compact_ts_str(ts: str) -> datetime:
 def utcnow_minus_buffer_ts() -> datetime:
     """Calculate the full dataset end timestamp - leaving a buffer window (before now)
     to ensure balancing authorities have reported their data to EIA"""
-    return (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS)).to_pydatetime()
+    return (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS))
 
 
 """

@@ -20,7 +20,7 @@ def fetch_eval_dataset() -> pd.DataFrame:
     end_ts = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS))
     start_ts = end_ts - pd.Timedelta(hours=EIA_TEST_SET_HOURS)
     print(f'Fetching evaluation EIA dataset. start:{start_ts}. end:{end_ts}')
-    df = get_eia_data_as_df(start_ts, end_ts)
+    df = fetch_data(start_ts, end_ts)
 
     # Prefix historical data in order to fill in lag column values
     df = add_lag_backfill_data(df)

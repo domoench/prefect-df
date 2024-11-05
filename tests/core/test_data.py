@@ -1,7 +1,7 @@
 from core.data import (
     add_time_lag_features, add_holiday_feature, calculate_lag_backfill_ranges,
     calculate_chunk_index, chunk_index_intersection, print_chunk_index_diff,
-    diff_chunk_indices
+    diff_chunk_indices, get_chunk_index, fetch_data
 )
 from core.utils import create_timeseries_df_1h
 from core.types import ChunkIndex
@@ -30,6 +30,19 @@ def timeseries_df():
         return df
 
     return _create_timeseries_df
+
+@pytest.fixture
+def chunk_index():
+    return ChunkIndex(pd.DataFrame({
+        'year': [2015, 2015, 2016, 2016, 2016, 2016],
+        'quarter': [3, 4, 1, 2, 3, 4],
+        'start_ts': [Timestamp('2015-07-01 00:00:00+0000', tz='UTC'), Timestamp('2015-10-01 00:00:00+0000', tz='UTC'), Timestamp('2016-01-01 00:00:00+0000', tz='UTC'), Timestamp('2016-04-01 00:00:00+0000', tz='UTC'), Timestamp('2016-07-01 00:00:00+0000', tz='UTC'), Timestamp('2016-10-01 00:00:00+0000', tz='UTC')],
+        'end_ts': [Timestamp('2015-09-30 23:00:00+0000', tz='UTC'), Timestamp('2015-12-31 23:00:00+0000', tz='UTC'), Timestamp('2016-03-31 23:00:00+0000', tz='UTC'), Timestamp('2016-06-30 23:00:00+0000', tz='UTC'), Timestamp('2016-09-30 23:00:00+0000', tz='UTC'), Timestamp('2016-12-31 23:00:00+0000', tz='UTC')],
+        'data_start_ts': [Timestamp('2015-07-01 05:00:00+0000', tz='UTC'), Timestamp('2015-10-01 00:00:00+0000', tz='UTC'), Timestamp('2016-01-01 00:00:00+0000', tz='UTC'), Timestamp('2016-04-01 00:00:00+0000', tz='UTC'), Timestamp('2016-07-01 00:00:00+0000', tz='UTC'), Timestamp('2016-10-01 00:00:00+0000', tz='UTC')],
+        'data_end_ts': [Timestamp('2015-09-30 23:00:00+0000', tz='UTC'), Timestamp('2015-12-31 23:00:00+0000', tz='UTC'), Timestamp('2016-03-31 23:00:00+0000', tz='UTC'), Timestamp('2016-06-30 23:00:00+0000', tz='UTC'), Timestamp('2016-09-30 23:00:00+0000', tz='UTC'), Timestamp('2016-12-20 23:00:00+0000', tz='UTC')],
+        'name': ['2015_Q3_from_2015-07-01-00_to_2015-09-30-23', '2015_Q4_from_2015-10-01-00_to_2015-12-31-23', '2016_Q1_from_2016-01-01-00_to_2016-03-31-23', '2016_Q2_from_2016-04-01-00_to_2016-06-30-23', '2016_Q3_from_2016-07-01-00_to_2016-09-30-23', '2016_Q4_from_2016-10-01-00_to_2016-12-31-23'],
+        'complete': [False, True, True, True, True, False],
+    }))
 
 @pytest.fixture
 def chunk_indices():
@@ -143,8 +156,7 @@ class TestData:
     def test_calculate_chunk_index(self, timeseries_df):
         start_ts = Timestamp('2023-12-24 05:00:00+00:00')
         end_ts = Timestamp('2024-10-29 20:00:00+00:00')
-        df = timeseries_df(start_ts, end_ts)
-        chunk_idx_df = calculate_chunk_index(df)
+        chunk_idx_df = calculate_chunk_index(start_ts, end_ts)
         assert len(chunk_idx_df) == 5
         assert chunk_idx_df.iloc[0].to_dict() == {
             'year': 2023,
@@ -232,3 +244,19 @@ class TestData:
             '   year  quarter                  start_ts                    end_ts  complete\n' \
             '2  2017        1 2017-01-01 00:00:00+00:00 2017-03-31 23:00:00+00:00      True\n' \
             '3  2017        2 2017-04-01 00:00:00+00:00 2017-06-30 23:00:00+00:00     False\n'
+
+    """ TODO: Decide if its worth mocking all this out
+    def test_fetch_data_with_dvc(self, chunk_index, monkeypatch):
+        def mock_get_chunk_index():
+            return chunk_index
+        monkeypatch.setattr('core.data.get_chunk_index', mock_get_chunk_index)
+        from unittest.mock import Mock
+        mock_chunk_index_intersection = Mock()
+        monkeypatch.setattr('core.data.chunk_index_intersection', mock_chunk_index_intersection)
+        start_ts = chunk_index.iloc[0].data_start_ts
+        end_ts = chunk_index.iloc[0].data_end_ts + pd.Timedelta(hours=1)
+
+        # CASE I:
+        fetch_data(start_ts, end_ts, use_dvc=True)
+        assert mock_chunk_index_intersection.called
+    """

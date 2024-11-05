@@ -79,5 +79,10 @@ class MLFlowModelInfo(BaseModel):
 Exceptions
 """
 
+
 class EIADataUnavailableException(Exception):
+    pass
+
+
+class RedundantExtractionException(Exception):
     pass
