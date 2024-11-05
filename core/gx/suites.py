@@ -1,6 +1,7 @@
-from core.consts import EIA_MAX_D_VAL, EIA_MIN_D_VAL, TARGET
-from core.model import get_model_features
-from core.types import ModelFeatureFlags
+from core.consts import (
+    EIA_MAX_D_VAL, EIA_MIN_D_VAL, TARGET, TIME_FEATURES, LAG_FEATURES,
+    HOLIDAY_FEATURES
+)
 import great_expectations as gx
 
 # Import custom expectations to ensure they are registered
@@ -39,11 +40,12 @@ def add_dvc_expectation_suite(gx_ctx):
 
 def add_train_expectation_suite(gx_ctx):
     # Expectations on the pre-processed dataframe (that will serve as training
-    # data to the xgboost model).
-    suite = gx.ExpectationSuite(name='train')
+    # or eval data to the xgboost model).
+    suite = gx.ExpectationSuite(name='xgb_input')
     gx_ctx.suites.add(suite)
 
-    features = get_model_features(ModelFeatureFlags(lag=True, weather=False, holidays=True))
+    # TODO: Add WEATHER_FEATURES to this
+    features = TIME_FEATURES.copy() + LAG_FEATURES + HOLIDAY_FEATURES
     suite.add_expectation(
         gx.expectations.ExpectTableColumnsToMatchSet(
             column_set=['utc_ts'] + features + [TARGET],

@@ -1,63 +1,21 @@
 from prefect import flow, task, runtime
 from prefect.exceptions import ObjectNotFound
 from core.consts import (
-    EIA_TEST_SET_HOURS, EIA_MAX_D_VAL, EIA_MIN_D_VAL,
-    DVC_EARLIEST_DATA_HOUR
+    EIA_TEST_SET_HOURS, DVC_EARLIEST_DATA_HOUR, EIA_BUFFER_HOURS
 )
 from core.data import (
-    add_time_meaning_features, add_time_lag_features, add_holiday_feature,
-    calculate_lag_backfill_ranges, cap_column_outliers, impute_null_demand_values,
-    get_chunk_index, chunk_index_intersection, get_range_from_dvc_as_df,
-    get_current_dvc_commit_hash, fetch_data
+    get_chunk_index, chunk_index_intersection, get_current_dvc_commit_hash
 )
+from core.model import get_data_for_model_input
 from core.types import ModelFeatureFlags, validate_call, ChunkIndex
 from core.model import train_xgboost, get_model_features
 from core.utils import (
-    compact_ts_str, mlflow_endpoint_uri, concat_time_indexed_dfs,
-    utcnow_minus_buffer_ts, df_summary
+    compact_ts_str, mlflow_endpoint_uri, utcnow_minus_buffer_ts, df_summary
 )
-from core.gx.gx import gx_validate_df
 from datetime import datetime
 import mlflow
 import pandas as pd
 import xgboost
-
-
-@task
-@validate_call
-def preprocess_data(df: pd.DataFrame):
-    """Data cleaning and feature engineering.
-
-    Args:
-        df: The full length (train + test time window) raw data set from the warehouse
-    Returns:
-        df: Training dataset (test set removed)
-    """
-    # Feature Engineering
-    df = clean_data(df)
-    df = features(df)
-    return df
-
-
-@task
-@validate_call
-def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Cap outliers and impute null values"""
-    # Cap threshold values
-    df = cap_column_outliers(df, 'D', EIA_MIN_D_VAL, EIA_MAX_D_VAL)
-    df = impute_null_demand_values(df)
-    return df
-
-
-@task
-@validate_call
-def features(df: pd.DataFrame) -> pd.DataFrame:
-    # Add temporal features
-    df = add_time_meaning_features(df)
-    df = add_time_lag_features(df)
-    df = add_holiday_feature(df)
-    print(df)
-    return df
 
 
 @task
@@ -100,18 +58,6 @@ def train_xgb_with_tracking(train_df: pd.DataFrame, features) -> xgboost.sklearn
 
 
 @task
-def add_lag_backfill_data(df: pd.DataFrame) -> pd.DataFrame:
-    """For the given datetime-indexed dataframe, fetch the same date range for
-    the past 3 years, and return a dataframe with those rows prefixed. """
-    df = df.copy()
-    lag_dfs: list[pd.DataFrame] = []
-    for (lag_start_ts, lag_end_ts) in calculate_lag_backfill_ranges(df):
-        lag_df = get_range_from_dvc_as_df(lag_start_ts, lag_end_ts)
-        lag_dfs.append(lag_df)
-    return concat_time_indexed_dfs(lag_dfs + [df])
-
-
-@task
 @validate_call
 def get_training_data(
     start_ts: pd.Timestamp, end_ts: pd.Timestamp, chunk_idx: ChunkIndex
@@ -120,18 +66,7 @@ def get_training_data(
     _, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
     if miss_range is not None:
         raise NotImplementedError('We can only train on data in DVC')
-    train_df = fetch_data(start_ts, end_ts)
-
-    # Backfill lag data (also from DVC)
-    train_df = add_lag_backfill_data(train_df)
-
-    # Preprocess
-    train_df = preprocess_data(train_df)
-    # Strip off the historical/lag prefix data
-    train_df = train_df.loc[start_ts:]
-    # Validate
-    gx_validate_df('train', train_df)
-    return train_df
+    return get_data_for_model_input(start_ts, end_ts)
 
 
 # https://docs.prefect.io/latest/concepts/flows/#parameters
@@ -157,7 +92,11 @@ def train_model(
         # Pick start date that allows 3 years of lag data
         start_ts = pd.Timestamp(DVC_EARLIEST_DATA_HOUR) + pd.DateOffset(years=3)
     if not end_ts:
-        end_ts = chunk_idx.iloc[-1].data_end_ts
+        max_dvc_hour = chunk_idx.iloc[-1].data_end_ts
+        max_train_hour = pd.Timestamp.utcnow().round('h') - pd.Timedelta(
+            hours=EIA_BUFFER_HOURS + EIA_TEST_SET_HOURS
+        )
+        end_ts = min(max_dvc_hour, max_train_hour)
     start_ts, end_ts = pd.Timestamp(start_ts), pd.Timestamp(end_ts)
 
     # Ensure the training set leaves enough hours of EIA data for the

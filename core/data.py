@@ -4,7 +4,7 @@ Module containing logic for getting and persisting data, and feature engineering
 
 from scipy.stats import skew
 from collections import defaultdict
-from core.consts import EIA_MAX_REQUEST_ROWS
+from core.consts import EIA_MAX_REQUEST_ROWS, EIA_MIN_D_VAL, EIA_MAX_D_VAL
 from core.types import DVCDatasetInfo, validate_call, ChunkIndex, EIADataUnavailableException
 from core.gx.gx import gx_validate_df
 from core.holidays import is_holiday
@@ -27,6 +27,40 @@ import dvc.api
 import io
 import os
 import requests
+
+
+@validate_call
+def preprocess_data(df: pd.DataFrame):
+    """Data cleaning and feature engineering.
+
+    Args:
+        df: The full length (train + test time window) raw data set from the warehouse
+    Returns:
+        df: Training dataset (test set removed)
+    """
+    # Feature Engineering
+    df = clean_data(df)
+    df = features(df)
+    return df
+
+
+@validate_call
+def clean_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Cap outliers and impute null values"""
+    # Cap threshold values
+    df = cap_column_outliers(df, 'D', EIA_MIN_D_VAL, EIA_MAX_D_VAL)
+    df = impute_null_demand_values(df)
+    return df
+
+
+@validate_call
+def features(df: pd.DataFrame) -> pd.DataFrame:
+    # Add temporal features
+    df = add_time_meaning_features(df)
+    df = add_time_lag_features(df)
+    df = add_holiday_feature(df)
+    print(df)
+    return df
 
 
 def add_time_meaning_features(df):
@@ -74,6 +108,17 @@ def calculate_lag_backfill_ranges(df):
     # When df's time range spans more than a year, the lags ranges will overlap.
     ranges = merge_intervals(ranges)
     return ranges
+
+
+def add_lag_backfill_data(df: pd.DataFrame) -> pd.DataFrame:
+    """For the given datetime-indexed dataframe, fetch the same date range for
+    the past 3 years, and return a dataframe with those rows prefixed. """
+    df = df.copy()
+    lag_dfs: list[pd.DataFrame] = []
+    for (lag_start_ts, lag_end_ts) in calculate_lag_backfill_ranges(df):
+        lag_df = get_range_from_dvc_as_df(lag_start_ts, lag_end_ts)
+        lag_dfs.append(lag_df)
+    return concat_time_indexed_dfs(lag_dfs + [df])
 
 
 def calculate_chunk_index(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> ChunkIndex:
@@ -457,7 +502,6 @@ def transform_eia_data_to_dvc_form(eia_df: pd.DataFrame | None):
     return merge_df
 
 
-
 def get_range_from_dvc_as_df(start_ts: pd.Timestamp, end_ts: pd.Timestamp):
     """Fetch data from DVC covering the given time range."""
     print(f'Requesting data from DVC. start:{start_ts}. end:{end_ts}')
@@ -474,8 +518,12 @@ def get_range_from_dvc_as_df(start_ts: pd.Timestamp, end_ts: pd.Timestamp):
         chunk_df = get_dvc_dataset_as_df(dvc_data_ref)
         chunk_dfs.append(chunk_df)
 
-    # Concatenate
+    # Concatenate data chunks
     df = concat_time_indexed_dfs(chunk_dfs)
+
+    # Trim data down to the requested range
+    df = df[(df.index >= start_ts) & (df.index <= end_ts)]
+
     print(f'Fetched data from DVC. start:{df.index.min()}. end:{df.index.max()}')
     return df
 

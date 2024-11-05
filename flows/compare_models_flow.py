@@ -3,8 +3,7 @@ from mlflow import MlflowClient
 from pprint import pprint
 from typing import List
 from collections import defaultdict
-from flows.etl_flow import get_eia_data_as_df, transform
-from flows.train_model_flow import clean_data, features, add_lag_backfill_data
+from core.model import get_data_for_model_input
 from core.types import MLFlowModelSpecifier, MLFlowModelInfo
 from core.consts import EIA_TEST_SET_HOURS, EIA_BUFFER_HOURS, TARGET
 from core.model import model_features_str
@@ -20,19 +19,7 @@ def fetch_eval_dataset() -> pd.DataFrame:
     end_ts = (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS))
     start_ts = end_ts - pd.Timedelta(hours=EIA_TEST_SET_HOURS)
     print(f'Fetching evaluation EIA dataset. start:{start_ts}. end:{end_ts}')
-    df = fetch_data(start_ts, end_ts)
-
-    # Prefix historical data in order to fill in lag column values
-    df = add_lag_backfill_data(df)
-
-    # Transform and feature engineer
-    df = transform(df)
-    df = clean_data(df)
-    df = features(df)
-
-    # Strip off the historical/lag prefix data
-    df = df.loc[start_ts:]
-
+    df = get_data_for_model_input(start_ts, end_ts)
     print(f'Eval data df:\n{df}')
     return df
 

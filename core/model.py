@@ -10,7 +10,9 @@ from core.consts import (
     EIA_TEST_SET_HOURS, TIME_FEATURES, LAG_FEATURES, WEATHER_FEATURES,
     HOLIDAY_FEATURES, TARGET
 )
+from core.data import fetch_data, add_lag_backfill_data, preprocess_data
 from core.types import ModelFeatureFlags, validate_call
+from core.gx.gx import gx_validate_df
 
 DEFAULT_XGB_PARAMS = {
     'learning_rate': [0.02],
@@ -94,3 +96,21 @@ def train_xgboost(df, features, hyperparam_tuning=False):
     best_est = reg.best_estimator_
     print(f'Feature importances: {best_est.feature_importances_}')
     return best_est
+
+
+@validate_call
+def get_data_for_model_input(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
+    df = fetch_data(start_ts, end_ts)
+
+    # Backfill lag data (also from DVC)
+    df = add_lag_backfill_data(df)
+
+    # Preprocess
+    df = preprocess_data(df)
+
+    # Strip off the historical/lag prefix data
+    df = df.loc[start_ts:]
+
+    # Validate
+    gx_validate_df('xgb_input', df)
+    return df
