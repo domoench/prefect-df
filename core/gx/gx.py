@@ -30,7 +30,7 @@ def gx_validate_df(suite_name, df):
     gx_ctx = get_gx_context()
 
     # Connect Data
-    data_source = gx_ctx.get_datasource(name=GX_DATASOURCE_NAME)
+    data_source = gx_ctx.data_sources.get(name=GX_DATASOURCE_NAME)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     df_asset_name = f'{suite_name}-df-{timestamp}'
     data_asset = data_source.add_dataframe_asset(name=df_asset_name)

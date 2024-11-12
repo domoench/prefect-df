@@ -35,7 +35,7 @@ def parse_compact_ts_str(ts: str) -> datetime:
 def utcnow_minus_buffer_ts() -> datetime:
     """Calculate the full dataset end timestamp - leaving a buffer window (before now)
     to ensure balancing authorities have reported their data to EIA"""
-    return (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS)).to_pydatetime()
+    return (pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=EIA_BUFFER_HOURS))
 
 
 """
@@ -85,6 +85,22 @@ def remove_rows_with_duplicate_indices(df: pd.DataFrame):
     first."""
     dupe_mask = df.index.duplicated(keep='first')
     return df[~dupe_mask]
+
+
+def concat_time_indexed_dfs(dfs) -> pd.DataFrame:
+    """Concatenate the given list of DatetimeIndex-ed dataframes, ensuring any
+    duplicate rows (e.g. when input dataframes have overlapping time ranges)
+    are removed."""
+    concat_df = pd.concat(dfs)
+    concat_df = remove_rows_with_duplicate_indices(concat_df)
+    concat_df = concat_df.sort_index()
+    return concat_df
+
+
+def has_full_hourly_index(df: pd.DataFrame) -> bool:
+    start_ts, end_ts = df.index.min(), df.index.max()
+    expected_range = pd.date_range(start=start_ts, end=end_ts, freq='H')
+    return df.index.equals(expected_range)
 
 
 """
@@ -142,7 +158,7 @@ def model_to_pickle_buff(model):
 
 
 def ensure_empty_dir(dir_path):
-    """Ensure the given directory exists and is empty"""
+    """Ensure the given directory exists and is empty."""
     directory = os.path.dirname(dir_path)
     if not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)
@@ -181,3 +197,15 @@ def merge_intervals(intervals):
     merged.append((curr_s, curr_e))
 
     return merged
+
+
+def interval_intersection(a, b):
+    """Calculate the intersection interval of 2 given intervals"""
+    assert a[0] <= a[1]
+    assert b[0] <= b[1]
+    a, b = sorted([a, b], key=lambda x: x[0])
+
+    if a[1] < b[0]:
+        return None
+
+    return (b[0], min(a[1], b[1]))
