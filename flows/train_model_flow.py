@@ -43,7 +43,9 @@ def mlflow_emit_tags_and_params(train_df: pd.DataFrame):
 
 @task
 @validate_call
-def train_xgb_with_tracking(train_df: pd.DataFrame, features) -> xgboost.sklearn.XGBRegressor:
+def train_xgb_with_tracking(
+    train_df: pd.DataFrame, features: list, hyperparam_tuning: bool
+) -> xgboost.sklearn.XGBRegressor:
     # MLFlow Tracking
     mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
     mlflow.set_experiment('xgb.df.train')
@@ -53,7 +55,12 @@ def train_xgb_with_tracking(train_df: pd.DataFrame, features) -> xgboost.sklearn
         # Cross validation training
         # TODO: Parameterize Optional Hyper param tuning
         mlflow.xgboost.autolog()
-        reg = train_xgboost(train_df, features, hyperparam_tuning=False)
+        reg, cv_res_df = train_xgboost(train_df, features, hyperparam_tuning=hyperparam_tuning)
+
+        # Log table of cross validation results
+        filename = 'cv_results.html'
+        cv_res_df.to_html(filename)
+        mlflow.log_artifact(filename)
     return reg
 
 
@@ -114,7 +121,8 @@ def train_model(
     # of during training.
     features = get_model_features(feature_flags)
 
+    hyperparam_tuning = False  # TODO parametrize in prefect flow run
     if mlflow_tracking:
-        return train_xgb_with_tracking(train_df, features)
+        return train_xgb_with_tracking(train_df, features, hyperparam_tuning=hyperparam_tuning)
     else:
-        return train_xgboost(train_df, features, hyperparam_tuning=False)
+        return train_xgboost(train_df, features, hyperparam_tuning=hyperparam_tuning)

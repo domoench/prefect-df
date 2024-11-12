@@ -3,6 +3,7 @@ Module containing logic for ML model training.
 """
 
 from sklearn.model_selection import TimeSeriesSplit, GridSearchCV
+from sklearn.metrics import r2_score
 import xgboost as xgb
 import pandas as pd
 import mlflow
@@ -14,10 +15,11 @@ from core.data import fetch_data, add_lag_backfill_data, preprocess_data
 from core.types import ModelFeatureFlags, validate_call
 from core.gx.gx import gx_validate_df
 
+# Determined by hyperparam tuning on 11/12/24
 DEFAULT_XGB_PARAMS = {
     'learning_rate': [0.02],
     'max_depth': [5],
-    'n_estimators': [1000],
+    'n_estimators': [500],
     'objective': ['reg:squarederror'],
 }
 
@@ -72,7 +74,7 @@ def train_xgboost(df, features, hyperparam_tuning=False):
     params = DEFAULT_XGB_PARAMS
     if hyperparam_tuning:
         params = {
-            'n_estimators': [100, 1000],
+            'n_estimators': [100, 500, 1000],
             'max_depth': [3, 5, 10],
             'learning_rate': [0.01, 0.02, 0.04],
             'objective': ['reg:squarederror'],
@@ -86,16 +88,17 @@ def train_xgboost(df, features, hyperparam_tuning=False):
     tss = TimeSeriesSplit(n_splits=NUM_SPLITS, test_size=EIA_TEST_SET_HOURS)
 
     # Perform hyperparameter tuning with time series cross validation.
-    reg = GridSearchCV(xgb.XGBRegressor(), params, cv=tss, verbose=2)
+    reg = GridSearchCV(xgb.XGBRegressor(eval_metric=r2_score), params, cv=tss, verbose=2)
     reg.fit(df[features], df[TARGET])
 
     cv_results_df = pd.DataFrame(reg.cv_results_).sort_values(by='rank_test_score')
     print(f'Cross validation results:\n{cv_results_df}')
     print(f'Best parameters:\n{reg.best_params_}')
+    print(f'Best score:\n{reg.best_score_}')
 
     best_est = reg.best_estimator_
     print(f'Feature importances: {best_est.feature_importances_}')
-    return best_est
+    return best_est, cv_results_df
 
 
 @validate_call
