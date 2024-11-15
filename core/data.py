@@ -121,10 +121,28 @@ def add_lag_backfill_data(df: pd.DataFrame) -> pd.DataFrame:
     return concat_time_indexed_dfs(lag_dfs + [df])
 
 
-def calculate_chunk_index(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> ChunkIndex:
+def calculate_chunk_index(start_ts: pd.Timestamp | None, end_ts: pd.Timestamp | None) -> ChunkIndex:
     """Index the time interval into standard calendar (not fiscal) quarter
     chunks/intervals. Each chunk in the index has a boolean flag to specify whether
-    it is complete (has data for every hour) or not."""
+    it is complete (has data for every hour) or not.
+
+    If both timestamps are set to None, returns a zero-row chunk index.
+    """
+    # Handle empty index case
+    if all([start_ts is None, end_ts is None]):
+        dtypes = {
+            'year': 'int64',
+            'quarter': 'int64',
+            'start_ts': 'datetime64[ns, UTC]',
+            'end_ts': 'datetime64[ns, UTC]',
+            'data_start_ts': 'datetime64[ns, UTC]',
+            'data_end_ts': 'datetime64[ns, UTC]',
+            'name': 'object',
+            'complete': 'bool',
+        }
+        df = pd.DataFrame({col: pd.Series(dtype=dt) for col, dt in dtypes.items()})
+        return ChunkIndex(df)
+
     # Beginning and end of logical (quarter) chunks
     q_start_ts = pd.Timestamp(start_ts).to_period('Q').start_time.tz_localize('UTC')
     q_end_ts = pd.Timestamp(end_ts).to_period('Q').end_time.tz_localize('UTC')
@@ -175,6 +193,10 @@ def chunk_index_intersection(chunk_idx: ChunkIndex, start_ts: datetime, end_ts: 
     """Given a chunk index and a (start_ts, end_ts) requested range, determine the intersection
     between the contiguous range covered by the index and the requested range. Return 2 range
     tuples: one describing the 'hit' range, and the other the 'miss' range."""
+    # Handly empty chunk index case
+    if len(chunk_idx) == 0:
+        return (None, (start_ts, end_ts))
+
     cache_start, cache_end = (chunk_idx.iloc[0].data_start_ts, chunk_idx.iloc[-1].data_end_ts)
     req_start, req_end = (start_ts, end_ts)
 
@@ -339,10 +361,10 @@ def get_current_dvc_commit_hash():
     return str(git_repo.head.commit)
 
 
-@task(cache_key_fn=task_input_hash, refresh_cache=(os.getenv('DF_ENVIRONMENT') == 'dev'))
+@task
 @validate_call
 def concurrent_fetch_EIA_data(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
-    print(f'Requesting data from EIA. start:{start_ts}. end:{end_ts}')
+    print(f'Requesting demand data from EIA. start:{start_ts}. end:{end_ts}')
     # Quantize the start and end timestamps to midnight. The EIA API sometimes freaks
     # out and returns nothing otherwise.
     orig_start_ts, orig_end_ts = start_ts, end_ts
@@ -417,13 +439,55 @@ def get_eia_data_as_df(
     return df
 
 
+@task
+@validate_call
+def fetch_weather_data(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame:
+    print(f'Requesting weather data from OpenMeteo. start:{start_ts}. end:{end_ts}')
+
+    # Quantize fetch interval - OpenMeteo only accepts dates
+    orig_start_ts, orig_end_ts = start_ts, end_ts
+    start_ts = start_ts.normalize()
+    end_ts = (end_ts + pd.Timedelta(days=1)).normalize()
+    print('Quantizing fetch interval.\n'
+          f' Original: start:{orig_start_ts}. end:{orig_end_ts}\n'
+          f'Quantized: start:{start_ts}. end:{end_ts}\n')
+
+    # Request data. TODO probably move this into a request_weather_data function
+    url = ('https://archive-api.open-meteo.com/v1/era5?'
+           'hourly=temperature_2m,cloud_cover')
+    params = {
+        # Using Reading PA as a single representative temp for PJM region
+        'latitude': 40.407293,
+        'longitude': -75.968453,
+        'start_date': start_ts.strftime('%Y-%m-%d'),
+        'end_date': end_ts.strftime('%Y-%m-%d')
+    }
+    r = requests.get(url, params=params)
+    r.raise_for_status()
+    df = pd.DataFrame(r.json()['hourly'])
+
+    df['utc_ts'] = pd.to_datetime(df['time'], utc=True)
+    df = df.set_index('utc_ts')
+    df = df.drop(columns='time')
+
+    # TODO: Trim data back to original requested range
+    request_range_mask = (df.index >= orig_start_ts) & (df.index <= orig_end_ts)
+    num_extra_records = (~request_range_mask).sum()
+    if num_extra_records > 0:
+        print(f'Trimming off {num_extra_records} extra records.')
+    df = df[request_range_mask]
+    print(df_summary(df, 'weather api result'))
+    return df
+
+
 @validate_call
 def fetch_data(
     start_ts: pd.Timestamp, end_ts: pd.Timestamp,
     use_dvc: bool = True,
 ) -> pd.DataFrame | None:
-    """Fetch EIA demand timeseries data (in DVC warehouse format) for the given time range.
-    Abstracts away the data source: Either DVC (cached) or the live EIA API.
+    """Fetch EIA-demand and weather timeseries data (in DVC warehouse format)
+    for the given time range. Abstracts away the data source: Either DVC
+    (cached) or live API.
 
     Args:
         start_ts: Start of data range to fetch
@@ -439,38 +503,52 @@ def fetch_data(
     else:
         hit_range, miss_range = None, (start_ts, end_ts)
 
-    # Fetch the data
+    # Fetch cached data from DVC
     dvc_df = get_range_from_dvc_as_df(*hit_range) if hit_range is not None else None
+
+    # Fetch data from live APIs
     eia_df = concurrent_fetch_EIA_data(*miss_range) if miss_range is not None else None
+
+    # TODO: TEMPORARY REMOVE. The first time we run this, we'll use the DVC cache for
+    # EIA data (to reach back to 2015) but not for weather. After that, replace the
+    # following call with fetch_weather_data(*miss_range)
+    weather_df = fetch_weather_data(start_ts, end_ts) if miss_range is not None else None # TODO restore
 
     if miss_range is not None and len(eia_df) == 0:
         raise EIADataUnavailableException
 
-    # We must apply the ETL transform to the raw EIA-fetched data before merging
+    # We must apply the ETL transform to the raw api-fetched data before merging
     # with DVC-fetched data
-    eia_df = transform_eia_data_to_dvc_form(eia_df)
-    df = concat_time_indexed_dfs([dvc_df, eia_df])
-    # gx_validate_df('dvc', df)
+    api_df = transform_api_data_to_dvc_form(eia_df, weather_df)
+    df = concat_time_indexed_dfs([dvc_df, api_df])
 
     # Logging
     dvc_fetch_range = f'start:{dvc_df.index.min()}. end:{dvc_df.index.max()}' if dvc_df is not None else 'None'
-    eia_fetch_range = f'start:{eia_df.index.min()}. end:{eia_df.index.max()}' if eia_df is not None else 'None'
+    api_fetch_range = f'start:{api_df.index.min()}. end:{api_df.index.max()}' if api_df is not None else 'None'
     print(
         '\nfetch_data complete:\n'
         f'  Requested range: start:{start_ts}. end:{end_ts}.\n'
         f'  Fetched from DVC: {dvc_fetch_range}.\n'
-        f'  Fetched from EIA: {eia_fetch_range}.\n'
+        f'  Fetched from API: {api_fetch_range}.\n'
         f'  Fetched range: start:{df.index.min()}. end:{df.index.max()}.'
     )
 
     return df
 
 
-def transform_eia_data_to_dvc_form(eia_df: pd.DataFrame | None):
+@validate_call
+def transform_api_data_to_dvc_form(
+    eia_df: pd.DataFrame | None,
+    weather_df: pd.DataFrame | None
+) -> pd.DataFrame:
     """Convert types, drop duplicates, add D column, ensure every hour."""
-    if eia_df is None:
-        return eia_df
-    print('Transforming raw EIA timeseries to DVC warehouse format.')
+    if eia_df is None and weather_df is None:
+        return None
+    assert all([eia_df is not None, weather_df is not None])
+
+    print('Transforming raw API-fetched timeseries to DVC warehouse format.')
+
+    # TRANSFORM EIA DATA
 
     # Convert types
     eia_df['value'] = pd.to_numeric(eia_df['value'])
@@ -482,14 +560,20 @@ def transform_eia_data_to_dvc_form(eia_df: pd.DataFrame | None):
 
     # In the EIA API response, for any given hour, there are between 0 and 1 records:
     # 1 record for D value, or 0 if EIA has no D record. Units are MWh.
-    demand_df = eia_df[eia_df.type == 'D']
+    demand_df = eia_df[eia_df.type == 'D'] # TODO can i drop this line now that we aren't fetching DF records?
+
+    # TRANSFORM WEATHER DATA
+
+    # Convert types
+    weather_df['temperature_2m'] = pd.to_numeric(weather_df['temperature_2m'])
+    weather_df['cloud_cover'] = pd.to_numeric(weather_df['cloud_cover'])
 
     # Create base dataframe with a timestamp for every hour in the range
     start_ts = eia_df.index.min()
     end_ts = eia_df.index.max()
     dt_df = create_timeseries_df_1h(start_ts, end_ts)
 
-    # Merge in the demand timeseries
+    # Merge in the EIA demand timeseries
     merge_df = pd.merge(
         dt_df,
         demand_df[['value']].rename(columns={'value': 'D'}),
@@ -498,7 +582,16 @@ def transform_eia_data_to_dvc_form(eia_df: pd.DataFrame | None):
         how='left',
     )
 
-    print(df_summary(merge_df))
+    # Merge in the weather timerseries
+    merge_df = pd.merge(
+        merge_df,
+        weather_df,
+        left_index=True,
+        right_index=True,
+        how='left',
+    )
+
+    print(df_summary(merge_df, 'transform_api_data result'))
     return merge_df
 
 
@@ -532,8 +625,17 @@ def get_dvc_dataset_url(ddi: DVCDatasetInfo):
     return dvc.api.get_url(path=ddi.path, repo=ddi.repo, rev=ddi.rev)
 
 
-def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
-    """Commit the given dataframe to DVC in quarterly indexed chunks."""
+def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
+    """Commit the given dataframe to DVC in quarterly indexed chunks.
+
+    Args:
+        df: The extracted data to be persisted to DVC in chunks.
+        overwrite_index: If true, the local dvc index will be cleared: Chunks
+            deleted and index file set to an empty dataframe parquet file. All
+            chunks will then appear as appends. If false, only non-complete
+            existing chunks can be updated and only recent data that is not covered
+            by existing chunks can be appended.
+    """
     assert has_full_hourly_index(df)
     gx_validate_df('dvc', df)
     git_repo = get_dvc_GitRepo_client()
@@ -545,6 +647,8 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     # We must compare the old chunk index with the new datasets chunk index
     # to distinguish between update and append writes
     old_chunk_idx = get_chunk_index()
+    if overwrite_index:
+        old_chunk_idx = clear_local_chunk_index()
     print_chunk_index_diff(old_chunk_idx, chunk_idx)
     update_starts, append_starts = diff_chunk_indices(old_chunk_idx, chunk_idx)
 
@@ -580,6 +684,7 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     for i, chunk_df in enumerate(chunk_dfs):
         # Don't overwrite full chunks
         chunk_start_ts = chunk_idx.loc[i].start_ts
+        # TODO this overwrite protection logic doesn't work in the overwrite index case
         old_chunk_is_complete = chunk_idx[chunk_idx.start_ts == chunk_start_ts].complete.item()
         if not old_chunk_is_complete:
             # Write new chunk to disk
@@ -591,14 +696,17 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
             # Stage file for git tracking
             git_repo.git.add(dataset_path.with_suffix('.parquet.dvc'))
 
-    # Merge old and new chunk indices
-    old_data_start_ts, old_data_end_ts = old_chunk_idx.iloc[0].data_start_ts, old_chunk_idx.iloc[-1].data_end_ts
+    # Write new chunk index to disk
     new_data_start_ts, new_data_end_ts = df.index.min(), df.index.max()
-    if new_data_start_ts > old_data_end_ts + pd.Timedelta(hours=1):
-        raise NotImplementedError('DVC index currently assumes no data gaps.')
-    updated_chunk_idx = calculate_chunk_index(old_data_start_ts, new_data_end_ts)
-
-    # Write new index to disk
+    if overwrite_index:
+        updated_chunk_idx = calculate_chunk_index(new_data_start_ts, new_data_end_ts)
+    else:
+        # Merge old and new chunk indices
+        old_data_start_ts = old_chunk_idx.iloc[0].data_start_ts
+        old_data_end_ts = old_chunk_idx.iloc[-1].data_end_ts
+        if new_data_start_ts > old_data_end_ts + pd.Timedelta(hours=1):
+            raise NotImplementedError('DVC index currently assumes no data gaps.')
+        updated_chunk_idx = calculate_chunk_index(old_data_start_ts, new_data_end_ts)
     updated_chunk_idx.to_parquet(chunk_idx_path)
     update_strs.append(
         'Updated index:\n'
@@ -608,10 +716,11 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
         f'to  {updated_chunk_idx.iloc[-1].data_end_ts}\n'
     )
 
-    # Git stage non-data files
+    # Git stage non-data files: gitignore + index
     git_repo.git.add(chunk_data_path / '.gitignore')
     git_repo.git.add(chunk_idx_path)
 
+    # Commit and push to Git (tracking) and DVC (data files)
     diffs = git_repo.index.diff('HEAD')
     diff_files = list(map(lambda d: d.a_path, diffs))
     if len(diff_files) > 0:
@@ -631,6 +740,28 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
         dvc_repo.push()
     else:
         print('No dataset changes.')
+
+
+def clear_local_chunk_index():
+    """Clear the local filesystem's chunk index"""
+    print('Clearing the chunk index.')
+    # Ensure current chunk index is on the filesystem
+    _ = get_chunk_index()
+
+    # Delete the chunk files
+    local_dvc_repo_path = Path(os.getenv('DVC_LOCAL_REPO_PATH'))
+    chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
+    chunk_data_path = local_dvc_repo_path / 'v1/data'
+    for filename in os.listdir(chunk_data_path):
+        filepath = chunk_data_path / filename
+        print(f'Deleting chunk file: {filepath}')
+        os.unlink(filepath)
+
+    # Overwrite the chunk index with an empty one
+    empty_chunk_idx = calculate_chunk_index(None, None)
+    empty_chunk_idx.to_parquet(chunk_idx_path)
+    return empty_chunk_idx
+
 
 
 def diff_chunk_indices(old_idx: ChunkIndex, new_idx: ChunkIndex):

@@ -189,6 +189,12 @@ class TestData:
             'complete': False
         }
 
+    def test_calculate_chunk_index_empty(self):
+        empty_chunk_idx = calculate_chunk_index(None, None)
+        assert len(empty_chunk_idx) == 0
+        cols = ['year', 'quarter', 'start_ts', 'end_ts', 'data_start_ts', 'data_end_ts', 'name', 'complete']
+        assert set(empty_chunk_idx.columns) == set(cols)
+
     def test_chunk_index_intersection(self):
         chunk_idx = ChunkIndex(pd.DataFrame({
             'year': [2015, 2015, 2016, 2016, 2016, 2016],

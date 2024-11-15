@@ -66,11 +66,11 @@ Pandas
 """
 
 
-def df_summary(df) -> str:
+def df_summary(df, name: str = '') -> str:
     buffer = io.StringIO()
     df.info(buf=buffer)
-    return f'Dataframe info:\n{buffer.getvalue()}\n' \
-           f'Dataframe summary:\n{df}\n'
+    return f'{name} dataframe info:\n{buffer.getvalue()}\n' \
+           f'{name} dataframe summary:\n{df}\n'
 
 
 @validate_call

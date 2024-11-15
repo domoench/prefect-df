@@ -2,7 +2,7 @@ from prefect import flow, task
 from core.consts import DVC_EARLIEST_DATA_HOUR
 from core.data import (
     fetch_data, chunk_index_intersection, get_chunk_index,
-    commit_df_to_dvc_in_chunks
+    commit_df_to_dvc_in_chunks, clear_local_chunk_index
 )
 from core.types import validate_call, RedundantExtractionException
 from core.utils import utcnow_minus_buffer_ts
@@ -13,26 +13,33 @@ import pandas as pd
 @task
 @validate_call
 def extract_and_transform(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.DataFrame | None:
-    """Fetch any EIA demand timeseries data in the specified range that is not
+    """Fetch any timeseries data in the specified range that is not
     already in the DVC warehouse."""
     start_ts, end_ts = pd.Timestamp(start_ts), pd.Timestamp(end_ts)
     chunk_idx = get_chunk_index()
-    hit_range, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
+
+    # Short circuit to stop ETL if the requested data is already in DVC
+    _, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
     if miss_range is None:
-        msg = 'Requested data range already covered by DVC data warehouse. ' \
+        msg = 'Requested data range already fully covered by DVC data warehouse. ' \
               f'start:{start_ts}. end:{end_ts}'
         raise RedundantExtractionException(msg)
-    return fetch_data(*miss_range, use_dvc=False)
+
+    return fetch_data(start_ts, end_ts)
 
 
 @task
-def load(df: pd.DataFrame):
+def load(df: pd.DataFrame, overwrite_dvc: bool):
     """Load the data into the data warehouse."""
-    commit_df_to_dvc_in_chunks(df)
+    commit_df_to_dvc_in_chunks(df, overwrite_dvc)
 
 
 @flow(log_prints=True)
-def etl(start_ts: datetime | None, end_ts: datetime | None):
+def etl(
+    start_ts: datetime | None,
+    end_ts: datetime | None,
+    overwrite_dvc: bool = False
+):
     """Idempotently ensures all available hourly EIA demand data between the given start
     and end timestamps are persisted in the DVC data warehouse as a parquet chunk files.
     """
@@ -40,10 +47,11 @@ def etl(start_ts: datetime | None, end_ts: datetime | None):
         start_ts = pd.Timestamp(DVC_EARLIEST_DATA_HOUR)
     if not end_ts:
         end_ts = utcnow_minus_buffer_ts()
+    print(f'ETL Flow requested range: start:{start_ts}. end:{end_ts}')
 
     try:
         df = extract_and_transform(start_ts, end_ts)
-        load(df)
+        load(df, overwrite_dvc)
     except RedundantExtractionException as error:
         print(error)
         return
