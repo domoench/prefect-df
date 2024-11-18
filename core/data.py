@@ -502,11 +502,11 @@ def fetch_data(
         hit_range, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
     else:
         hit_range, miss_range = None, (start_ts, end_ts)
-    print( # TODO TEMP remove?
-        'fetch_data\n'
-        f'requested range: start:{start_ts}. end:{end_ts}.\n'
-        f'      hit range: {hit_range}.\n'
-        f'     miss range: {miss_range}.\n'
+    print(
+        '\nfetch_data initiated:\n'
+        f'  req range: start:{start_ts}. end:{end_ts}.\n'
+        f'  hit range: {hit_range}.\n'
+        f'  miss range: {miss_range}.\n'
     )
 
     # Fetch cached data from DVC
@@ -514,20 +514,16 @@ def fetch_data(
 
     # Fetch data from live APIs
     eia_df = concurrent_fetch_EIA_data(*miss_range) if miss_range is not None else None
-
-    # TODO: TEMP REMOVE. The first time we run this, we'll use the DVC cache for
-    # EIA data (to reach back to 2015) but not for weather. After that, replace the
-    # following call with fetch_weather_data(*miss_range)
-    weather_df = fetch_weather_data(start_ts, end_ts) if miss_range is not None else None # TODO TEMP restore
+    weather_df = fetch_weather_data(*miss_range) if miss_range is not None else None
 
     if miss_range is not None and len(eia_df) == 0:
         raise EIADataUnavailableException
 
     # We must apply the ETL transform to the raw api-fetched data before merging
     # with DVC-fetched data
-    # TODO: TEMP restore below
-    """
-    # api_df = transform_api_data_to_dvc_form(eia_df, weather_df)
+    api_df = transform_api_data_to_dvc_form(eia_df, weather_df)
+
+    # Concatenate DVC and API-fetched data
     df = concat_time_indexed_dfs([dvc_df, api_df])
 
     # Logging
@@ -540,57 +536,7 @@ def fetch_data(
         f'  Fetched from API: {api_fetch_range}.\n'
         f'  Fetched range: start:{df.index.min()}. end:{df.index.max()}.'
     )
-    """
-
-    # TODO TEMP: 1: Transform API-fetched EIA data
-    eia_df['value'] = pd.to_numeric(eia_df['value'])
-    eia_df = remove_rows_with_duplicate_indices(eia_df)
-    eia_df = eia_df[eia_df.type == 'D']
-    start_ts = eia_df.index.min()
-    end_ts = eia_df.index.max()
-    dt_df = create_timeseries_df_1h(start_ts, end_ts)
-    eia_df = pd.merge(
-        dt_df,
-        eia_df[['value']].rename(columns={'value': 'D'}),
-        left_index=True,
-        right_index=True,
-        how='left',
-    )
-    print(df_summary(eia_df, 'transform EIA API data result'))
-
-    # TODO TEMP: 2: Append to DVC-fetched EIA data
-    df = concat_time_indexed_dfs([dvc_df, eia_df])
-    assert has_full_hourly_index(df)
-    print(df_summary(df, 'EIA DVC+API concatenated data result'))
-
-    # TODO TEMP: 3: Transform API-fetched weather data
-    weather_df['temperature_2m'] = pd.to_numeric(weather_df['temperature_2m'])
-    weather_df['cloud_cover'] = pd.to_numeric(weather_df['cloud_cover'])
-
-    # Create base dataframe with a timestamp for every hour in the range
-    start_ts = weather_df.index.min()
-    end_ts = weather_df.index.max()
-    dt_df = create_timeseries_df_1h(start_ts, end_ts)
-    weather_df = pd.merge(
-        dt_df,
-        weather_df,
-        left_index=True,
-        right_index=True,
-        how='left',
-    )
-    assert has_full_hourly_index(weather_df)
-    print(df_summary(weather_df, 'transform weather data result'))
-
-    # TODO TEMP: 4: Merge with all EIA data
-    df = pd.merge(
-        df,
-        weather_df,
-        left_index=True,
-        right_index=True,
-        how='left',
-    )
-    assert has_full_hourly_index(df)
-    print(df_summary(df, 'Final data result'))
+    print(df_summary(df, 'fetch_data result'))
 
     return df
 
@@ -601,9 +547,13 @@ def transform_api_data_to_dvc_form(
     weather_df: pd.DataFrame | None
 ) -> pd.DataFrame:
     """Convert types, drop duplicates, add D column, ensure every hour."""
+    # Handle null case
     if eia_df is None and weather_df is None:
         return None
+
+    # Invariant assumptions
     assert all([eia_df is not None, weather_df is not None])
+    assert len(eia_df) == len(weather_df)
 
     print('Transforming raw API-fetched timeseries to DVC warehouse format.')
 
@@ -684,16 +634,11 @@ def get_dvc_dataset_url(ddi: DVCDatasetInfo):
     return dvc.api.get_url(path=ddi.path, repo=ddi.repo, rev=ddi.rev)
 
 
-def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
+def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     """Commit the given dataframe to DVC in quarterly indexed chunks.
 
     Args:
         df: The extracted data to be persisted to DVC in chunks.
-        overwrite_index: If true, the local dvc index will be cleared: Chunks
-            deleted and index file set to an empty dataframe parquet file. All
-            chunks will then appear as appends. If false, only non-complete
-            existing chunks can be updated and only recent data that is not covered
-            by existing chunks can be appended.
     """
     assert has_full_hourly_index(df)
     gx_validate_df('dvc', df)
@@ -706,8 +651,6 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
     # We must compare the old chunk index with the new datasets chunk index
     # to distinguish between update and append writes
     old_chunk_idx = get_chunk_index()
-    if overwrite_index:
-        old_chunk_idx = clear_local_chunk_index()
     print_chunk_index_diff(old_chunk_idx, chunk_idx)
     update_starts, append_starts = diff_chunk_indices(old_chunk_idx, chunk_idx)
 
@@ -741,11 +684,12 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
     chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
     chunk_data_path = local_dvc_repo_path / 'v1/data'
     for i, chunk_df in enumerate(chunk_dfs):
-        # Don't overwrite full chunks
+        # Don't overwrite full chunks.
+        # TODO: Implement flag to allow overwrites (updates). For example to correct DVC
+        # pollution by temporary EIA data problems (like obviously bogus imputed values for
+        # recent data they haven't recieved from BAs)
         chunk_start_ts = chunk_idx.loc[i].start_ts
-        # TODO: Fix line below. Replace chunk_idx[ with old_chunk_idx[. Right?
-        old_chunk_is_complete = chunk_idx[chunk_idx.start_ts == chunk_start_ts].complete.item()
-        old_chunk_is_complete = False  # TODO remove. Temporary condition to always overwrite.
+        old_chunk_is_complete = old_chunk_idx[chunk_idx.start_ts == chunk_start_ts].complete.item()
         if not old_chunk_is_complete:
             # Write new chunk to disk
             file_name = f"{chunk_idx.loc[i]['name']}.parquet"
@@ -756,17 +700,13 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
             # Stage file for git tracking
             git_repo.git.add(dataset_path.with_suffix('.parquet.dvc'))
 
-    # Write new chunk index to disk
+    # Merge old and new chunk indices and write to disk
     new_data_start_ts, new_data_end_ts = df.index.min(), df.index.max()
-    if overwrite_index:
-        updated_chunk_idx = calculate_chunk_index(new_data_start_ts, new_data_end_ts)
-    else:
-        # Merge old and new chunk indices
-        old_data_start_ts = old_chunk_idx.iloc[0].data_start_ts
-        old_data_end_ts = old_chunk_idx.iloc[-1].data_end_ts
-        if new_data_start_ts > old_data_end_ts + pd.Timedelta(hours=1):
-            raise NotImplementedError('DVC index currently assumes no data gaps.')
-        updated_chunk_idx = calculate_chunk_index(old_data_start_ts, new_data_end_ts)
+    old_data_start_ts = old_chunk_idx.iloc[0].data_start_ts
+    old_data_end_ts = old_chunk_idx.iloc[-1].data_end_ts
+    if new_data_start_ts > old_data_end_ts + pd.Timedelta(hours=1):
+        raise NotImplementedError('DVC index currently assumes no data gaps.')
+    updated_chunk_idx = calculate_chunk_index(old_data_start_ts, new_data_end_ts)
     updated_chunk_idx.to_parquet(chunk_idx_path)
     update_strs.append(
         'Updated index:\n'
@@ -789,10 +729,7 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
         pp(diff_files)
         commit_msg = 'Update dataset.\n\n'
         commit_msg += '\n'.join(update_strs)
-        if True:# TODO TEMP: Remove
-            print(f'commit_msg:\n{commit_msg}')
-            print(df_summary(df, 'final df'))
-            #assert False
+        print(f'Commiting to git.\n{commit_msg}')
         commit = git_repo.index.commit(commit_msg)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}')
@@ -800,7 +737,7 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
         # Push commit
         origin.push()
 
-        print('Pushing dataset to DVC remote storage')
+        print('Pushing dataset files to DVC remote storage')
         # Note: Push requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY
         dvc_repo.push()
     else:

@@ -29,16 +29,15 @@ def extract_and_transform(start_ts: pd.Timestamp, end_ts: pd.Timestamp) -> pd.Da
 
 
 @task
-def load(df: pd.DataFrame, overwrite_dvc: bool):
+def load(df: pd.DataFrame):
     """Load the data into the data warehouse."""
-    commit_df_to_dvc_in_chunks(df, overwrite_dvc)
+    commit_df_to_dvc_in_chunks(df)
 
 
 @flow(log_prints=True)
 def etl(
     start_ts: datetime | None,
     end_ts: datetime | None,
-    overwrite_dvc: bool = False
 ):
     """Idempotently ensures all available hourly EIA demand data between the given start
     and end timestamps are persisted in the DVC data warehouse as a parquet chunk files.
@@ -51,7 +50,7 @@ def etl(
 
     try:
         df = extract_and_transform(start_ts, end_ts)
-        load(df, overwrite_dvc)
+        load(df)
     except RedundantExtractionException as error:
         print(error)
         return
