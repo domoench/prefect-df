@@ -502,6 +502,12 @@ def fetch_data(
         hit_range, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
     else:
         hit_range, miss_range = None, (start_ts, end_ts)
+    print( # TODO remove?
+        'fetch_data\n'
+        f'requested range: start:{start_ts}. end:{end_ts}.\n'
+        f'      hit range: {hit_range}.\n'
+        f'     miss range: {miss_range}.\n'
+    )
 
     # Fetch cached data from DVC
     dvc_df = get_range_from_dvc_as_df(*hit_range) if hit_range is not None else None
@@ -684,8 +690,9 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
     for i, chunk_df in enumerate(chunk_dfs):
         # Don't overwrite full chunks
         chunk_start_ts = chunk_idx.loc[i].start_ts
-        # TODO this overwrite protection logic doesn't work in the overwrite index case
+        # TODO: Fix line below. Replace chunk_idx[ with old_chunk_idx[. Right?
         old_chunk_is_complete = chunk_idx[chunk_idx.start_ts == chunk_start_ts].complete.item()
+        old_chunk_is_complete = False  # TODO remove. Temporary condition to always overwrite.
         if not old_chunk_is_complete:
             # Write new chunk to disk
             file_name = f"{chunk_idx.loc[i]['name']}.parquet"
@@ -728,6 +735,10 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
         pp(diff_files)
         commit_msg = 'Update dataset.\n\n'
         commit_msg += '\n'.join(update_strs)
+        if True:
+            print('Final df')
+            print(df_summary(df, 'final df'))
+            assert False # TODO
         commit = git_repo.index.commit(commit_msg)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}')
@@ -762,6 +773,8 @@ def clear_local_chunk_index():
     empty_chunk_idx.to_parquet(chunk_idx_path)
     return empty_chunk_idx
 
+    # Overwrite .gitignore
+    (chunk_data_path / '.gitignore').touch()
 
 
 def diff_chunk_indices(old_idx: ChunkIndex, new_idx: ChunkIndex):
