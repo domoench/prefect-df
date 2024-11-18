@@ -502,7 +502,7 @@ def fetch_data(
         hit_range, miss_range = chunk_index_intersection(chunk_idx, start_ts, end_ts)
     else:
         hit_range, miss_range = None, (start_ts, end_ts)
-    print( # TODO remove?
+    print( # TODO TEMP remove?
         'fetch_data\n'
         f'requested range: start:{start_ts}. end:{end_ts}.\n'
         f'      hit range: {hit_range}.\n'
@@ -515,17 +515,19 @@ def fetch_data(
     # Fetch data from live APIs
     eia_df = concurrent_fetch_EIA_data(*miss_range) if miss_range is not None else None
 
-    # TODO: TEMPORARY REMOVE. The first time we run this, we'll use the DVC cache for
+    # TODO: TEMP REMOVE. The first time we run this, we'll use the DVC cache for
     # EIA data (to reach back to 2015) but not for weather. After that, replace the
     # following call with fetch_weather_data(*miss_range)
-    weather_df = fetch_weather_data(start_ts, end_ts) if miss_range is not None else None # TODO restore
+    weather_df = fetch_weather_data(start_ts, end_ts) if miss_range is not None else None # TODO TEMP restore
 
     if miss_range is not None and len(eia_df) == 0:
         raise EIADataUnavailableException
 
     # We must apply the ETL transform to the raw api-fetched data before merging
     # with DVC-fetched data
-    api_df = transform_api_data_to_dvc_form(eia_df, weather_df)
+    # TODO: TEMP restore below
+    """
+    # api_df = transform_api_data_to_dvc_form(eia_df, weather_df)
     df = concat_time_indexed_dfs([dvc_df, api_df])
 
     # Logging
@@ -538,6 +540,57 @@ def fetch_data(
         f'  Fetched from API: {api_fetch_range}.\n'
         f'  Fetched range: start:{df.index.min()}. end:{df.index.max()}.'
     )
+    """
+
+    # TODO TEMP: 1: Transform API-fetched EIA data
+    eia_df['value'] = pd.to_numeric(eia_df['value'])
+    eia_df = remove_rows_with_duplicate_indices(eia_df)
+    eia_df = eia_df[eia_df.type == 'D']
+    start_ts = eia_df.index.min()
+    end_ts = eia_df.index.max()
+    dt_df = create_timeseries_df_1h(start_ts, end_ts)
+    eia_df = pd.merge(
+        dt_df,
+        eia_df[['value']].rename(columns={'value': 'D'}),
+        left_index=True,
+        right_index=True,
+        how='left',
+    )
+    print(df_summary(eia_df, 'transform EIA API data result'))
+
+    # TODO TEMP: 2: Append to DVC-fetched EIA data
+    df = concat_time_indexed_dfs([dvc_df, eia_df])
+    assert has_full_hourly_index(df)
+    print(df_summary(df, 'EIA DVC+API concatenated data result'))
+
+    # TODO TEMP: 3: Transform API-fetched weather data
+    weather_df['temperature_2m'] = pd.to_numeric(weather_df['temperature_2m'])
+    weather_df['cloud_cover'] = pd.to_numeric(weather_df['cloud_cover'])
+
+    # Create base dataframe with a timestamp for every hour in the range
+    start_ts = weather_df.index.min()
+    end_ts = weather_df.index.max()
+    dt_df = create_timeseries_df_1h(start_ts, end_ts)
+    weather_df = pd.merge(
+        dt_df,
+        weather_df,
+        left_index=True,
+        right_index=True,
+        how='left',
+    )
+    assert has_full_hourly_index(weather_df)
+    print(df_summary(weather_df, 'transform weather data result'))
+
+    # TODO TEMP: 4: Merge with all EIA data
+    df = pd.merge(
+        df,
+        weather_df,
+        left_index=True,
+        right_index=True,
+        how='left',
+    )
+    assert has_full_hourly_index(df)
+    print(df_summary(df, 'Final data result'))
 
     return df
 
@@ -722,6 +775,7 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
         f'  Data range: {updated_chunk_idx.iloc[0].data_start_ts} '
         f'to  {updated_chunk_idx.iloc[-1].data_end_ts}\n'
     )
+    update_strs.append(df_summary(df, 'Persisted Data'))
 
     # Git stage non-data files: gitignore + index
     git_repo.git.add(chunk_data_path / '.gitignore')
@@ -735,10 +789,10 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame, overwrite_index: bool):
         pp(diff_files)
         commit_msg = 'Update dataset.\n\n'
         commit_msg += '\n'.join(update_strs)
-        if True:
-            print('Final df')
+        if True:# TODO TEMP: Remove
+            print(f'commit_msg:\n{commit_msg}')
             print(df_summary(df, 'final df'))
-            assert False # TODO
+            #assert False
         commit = git_repo.index.commit(commit_msg)
         git_commit_hash = str(commit)
         print(f'Git commit hash: {git_commit_hash}')
