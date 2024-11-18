@@ -358,7 +358,7 @@ def get_dvc_dataset_as_df(dvc_dataset_info: DVCDatasetInfo) -> pd.DataFrame:
 
 def get_current_dvc_commit_hash():
     git_repo = get_dvc_GitRepo_client()
-    return str(git_repo.head.commit)
+    return git_repo.head.commit.hexsha
 
 
 @task
