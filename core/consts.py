@@ -17,6 +17,6 @@ EIA_MIN_D_VAL = 60_000
 # XGB model features and target
 TIME_FEATURES = ['hour', 'month', 'year', 'quarter', 'dayofweek', 'dayofmonth', 'dayofyear']
 LAG_FEATURES = ['lag_1y', 'lag_2y', 'lag_3y']
-WEATHER_FEATURES = ['temp', 'cloud_cover', 'precip']
+WEATHER_FEATURES = ['temperature_2m', 'cloud_cover']
 HOLIDAY_FEATURES = ['is_holiday']
 TARGET = 'D'

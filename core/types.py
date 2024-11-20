@@ -86,3 +86,7 @@ class EIADataUnavailableException(Exception):
 
 class RedundantExtractionException(Exception):
     pass
+
+
+class GXValidationException(Exception):
+    pass

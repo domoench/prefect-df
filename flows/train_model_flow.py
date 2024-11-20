@@ -82,6 +82,7 @@ def train_model(
     start_ts: datetime | None,
     end_ts: datetime | None,
     mlflow_tracking: bool = True,
+    hyperparam_tuning: bool = False,
     feature_flags: ModelFeatureFlags = ModelFeatureFlags(),
     log_prints=True
 ) -> xgboost.sklearn.XGBRegressor:
@@ -91,6 +92,8 @@ def train_model(
         start_ts: Beginning of training dataset timespan (UTC)
         end_ts: End of training dataset timespan (UTC)
         mlflow_tracking: Flag to enable/disable mlflow tracking
+        hyperparam_tuning: Flag to enable/disable hyperparameter tuning during
+            model training.
         feature_flags: Controls which of the feature groups will be used
             in model training.
     """
@@ -113,15 +116,13 @@ def train_model(
     print(f'Training set time span: {start_ts} to {end_ts}')
 
     train_df = get_training_data(start_ts, end_ts, chunk_idx)
-    print('Training data summary:')
-    print(df_summary(train_df))
+    print(df_summary(train_df, 'Training Data'))
 
     # Preprocessing adds all feature groups to the training data set.
     # The feature flags determine which features the model will make use
     # of during training.
     features = get_model_features(feature_flags)
 
-    hyperparam_tuning = False  # TODO parametrize in prefect flow run
     if mlflow_tracking:
         return train_xgb_with_tracking(train_df, features, hyperparam_tuning=hyperparam_tuning)
     else:

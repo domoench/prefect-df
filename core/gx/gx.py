@@ -1,6 +1,7 @@
 import great_expectations as gx
 from core.gx.suites import add_expectation_suites
 from datetime import datetime
+from core.types import GXValidationException
 
 GX_DATASOURCE_NAME = 'pandas_datasource'
 
@@ -43,11 +44,7 @@ def gx_validate_df(suite_name, df):
     )
     results = validation_definition.run(batch_parameters={'dataframe': df.reset_index()})
     if not results['success']:
-        # TODO: Something more robust.
-        # Log event to datadog for monitoring?
-        # Generate data doc artifact?
-        # Throw an exception and fail?
         print(f'GX Validation failure. suite:{suite_name}')
-        print(results.describe_dict())
+        raise GXValidationException(results.describe_dict())
     else:
         print(f'GX Validation success: suite:{suite_name}')

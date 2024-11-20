@@ -14,6 +14,7 @@ from core.consts import (
 from core.data import fetch_data, add_lag_backfill_data, preprocess_data
 from core.types import ModelFeatureFlags, validate_call
 from core.gx.gx import gx_validate_df
+from core.utils import df_summary
 
 # Determined by hyperparam tuning on 11/12/24
 DEFAULT_XGB_PARAMS = {
@@ -93,8 +94,9 @@ def train_xgboost(df, features, hyperparam_tuning=False):
 
     cv_results_df = pd.DataFrame(reg.cv_results_).sort_values(by='rank_test_score')
     print(f'Cross validation results:\n{cv_results_df}')
-    print(f'Best parameters:\n{reg.best_params_}')
     print(f'Best score:\n{reg.best_score_}')
+    if hyperparam_tuning:
+        print(f'Best parameters:\n{reg.best_params_}')
 
     best_est = reg.best_estimator_
     print(f'Feature importances: {best_est.feature_importances_}')

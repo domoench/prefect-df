@@ -230,8 +230,12 @@ def cap_column_outliers(df, column, low, high):
 
 
 def impute_null_demand_values(df):
-    """Given an hour-resolution EIA dataframe with a 'D' column, impute null values
-    as the average value for the given month and hour."""
+    """Given an hour-resolution dataframe with D (demand), temperature_2m, and
+    cloud_cover columns, impute null values."""
+    # It seems OpenMeteo doesn't serve null values for these features
+    assert sum(df.temperature_2m.isnull()) == 0
+    assert sum(df.cloud_cover.isnull()) == 0
+
     df = df.copy()
     print(f'Null demand values: {sum(df.D.isnull())}')
 
@@ -243,7 +247,8 @@ def impute_null_demand_values(df):
             hour_mask = df.index.hour == hour
             avg_D_by_month_hour[month][hour] = df[month_mask & hour_mask].D.mean()
 
-    # Impute null values
+    # Impute null values for demand as the average value for the given month
+    # and hour.
     def impute_null_demand_value(row):
         month, hour = row.name.month, row.name.hour
         return avg_D_by_month_hour[month][hour]
