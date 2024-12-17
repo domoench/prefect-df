@@ -1,13 +1,12 @@
 import os
 import mlflow
 import pandas as pd
-from core.data import get_dvc_remote_repo_url, get_dvc_dataset_as_df
-from core.types import DVCDatasetInfo
-from core.consts import EIA_TEST_SET_HOURS
+from core.data import get_dvc_remote_repo_url
+from core.consts import EIA_TEST_SET_HOURS, DVC_EARLIEST_DATA_HOUR, EIA_BUFFER_HOURS
 from core.utils import mlflow_endpoint_uri, InvalidExecutionEnvironmentError
-from core.model import get_model_features
+from core.model import get_model_features, get_data_for_model_input
 from flows.train_model_flow import (
-    clean_data, features, mlflow_emit_tags_and_params
+    mlflow_emit_tags_and_params
 )
 
 
@@ -16,19 +15,15 @@ git_repo_url = get_dvc_remote_repo_url()
 # Get training data set
 df_env = os.getenv('DF_ENVIRONMENT')
 if df_env == 'prod':
-    path = 'data/eia_d_df_2019-01-01_00_2024-09-30_00.parquet'
-    rev = 'a2c13b81223c8a9f634e5688a10ccf0e1cbbb73c'
+    raise NotImplementedError
 elif df_env == 'dev':
-    path = 'data/eia_d_df_2019-01-01_00_2024-08-18_00.parquet'
-    rev = 'd427ae7c3b5afffc24ab806cf9538efc697b68bd'
+    start_ts = pd.Timestamp(DVC_EARLIEST_DATA_HOUR) + pd.DateOffset(years=3)
+    end_ts = pd.Timestamp.utcnow().round('h') - pd.Timedelta(hours=2*EIA_BUFFER_HOURS)
 else:
     raise InvalidExecutionEnvironmentError(df_env)
 
-dvc_dataset_info = DVCDatasetInfo(repo=git_repo_url, path=path, rev=rev)
-df = get_dvc_dataset_as_df(dvc_dataset_info)
 
-df = clean_data(df)
-df = features(df)
+df = get_data_for_model_input(start_ts, end_ts)
 
 # Chop off the last EIA_TEST_SET_HOURS hours, so the training set leaves
 # enough of a test set window for adhoc model evaluation.
@@ -64,7 +59,7 @@ signature = mlflow.models.infer_signature(X, y_pred)
 mlflow.set_tracking_uri(uri=mlflow_endpoint_uri())
 mlflow.set_experiment('xgb.df.register_baseline')
 with mlflow.start_run():
-    mlflow_emit_tags_and_params(df, dvc_dataset_info)
+    mlflow_emit_tags_and_params(df)
     mlflow.pyfunc.log_model(
         artifact_path="baseline_model",
         python_model=baseline_model,
