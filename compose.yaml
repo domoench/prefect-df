@@ -11,6 +11,7 @@ services:
     volumes:
       - ./flows:/opt/prefect/flows
       - ./core:/opt/prefect/core
+      - ./scripts/python:/opt/prefect/scripts/python
 
   # MLFlow Tracking server
   mlflow:

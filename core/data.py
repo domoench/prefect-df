@@ -689,13 +689,13 @@ def commit_df_to_dvc_in_chunks(df: pd.DataFrame):
     chunk_idx_path = local_dvc_repo_path / 'v1/chunk_idx.parquet'
     chunk_data_path = local_dvc_repo_path / 'v1/data'
     for i, chunk_df in enumerate(chunk_dfs):
-        # Don't overwrite full chunks.
-        # TODO: Implement flag to allow overwrites (updates). For example to correct DVC
-        # pollution by temporary EIA data problems (like obviously bogus imputed values for
-        # recent data they haven't recieved from BAs)
         chunk_start_ts = chunk_idx.loc[i].start_ts
-        old_chunk_is_complete = old_chunk_idx[chunk_idx.start_ts == chunk_start_ts].complete.item()
-        if not old_chunk_is_complete:
+        print(old_chunk_idx[old_chunk_idx.start_ts == chunk_start_ts])
+        old_chunk_present = not old_chunk_idx[old_chunk_idx.start_ts == chunk_start_ts].empty
+        old_chunk_complete = old_chunk_present and \
+            old_chunk_idx[old_chunk_idx.start_ts == chunk_start_ts].complete.item()
+        # Don't overwrite full chunks.
+        if not old_chunk_complete:
             # Write new chunk to disk
             file_name = f"{chunk_idx.loc[i]['name']}.parquet"
             dataset_path = chunk_data_path / file_name
@@ -778,7 +778,9 @@ def diff_chunk_indices(old_idx: ChunkIndex, new_idx: ChunkIndex):
     timestamps: One indicating chunks that need updating, and the second
     indicating chunks that are to be appended (all new data)."""
     start_intersect_mask = old_idx.start_ts.isin(new_idx.start_ts)
-    old_partial_mask = ~old_idx.complete
+    # Calculate which chunks need update: Those that are incomplete in
+    # the old index, but complete in the new one.
+    old_partial_mask = ~old_idx.complete & new_idx.complete
     update_starts = old_idx[start_intersect_mask & old_partial_mask].start_ts
     new_append_mask = ~new_idx.start_ts.isin(old_idx.start_ts)
     append_starts = new_idx[new_append_mask].start_ts

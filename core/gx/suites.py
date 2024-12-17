@@ -20,7 +20,7 @@ def add_dvc_expectation_suite(gx_ctx):
 
     suite.add_expectation(
         gx.expectations.ExpectTableColumnsToMatchSet(
-            column_set=['D', 'temperature_2m', 'cloud_cover'],
+            column_set=['utc_ts', 'D', 'temperature_2m', 'cloud_cover'],
             exact_match=True
         )
     )
